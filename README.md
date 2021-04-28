@@ -74,3 +74,11 @@ This section describes the most common environment variables. Other supported en
 
 {"percentage_threshold": 20}
 ```
+
+## Contributing
+
+Merge requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
+
+## License
+
+[Apache License 2.0](https://choosealicense.com/licenses/apache-2.0/)

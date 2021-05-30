@@ -6,7 +6,7 @@ This integration uses the latest version of Infracost by default as we regularly
 
 As mentioned in our [FAQ](https://infracost.io/docs/faq), no cloud credentials or secrets are sent to the Cloud Pricing API. Infracost does not make any changes to your Terraform state or cloud resources.
 
-<img src="screenshot.png" width=557 alt="Example screenshot" />
+<kbd><img src="screenshot.png" width=557 alt="Example screenshot" /></kbd>
 
 ## Table of Contents
 

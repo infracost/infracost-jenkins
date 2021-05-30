@@ -4,68 +4,21 @@ This repo shows how Infracost can be used with Jenkins. Given the variety of wor
 
 This integration uses the latest version of Infracost by default as we regularly add support for more cloud resources. If you run into any issues, please join our [community Slack channel](https://www.infracost.io/community-chat); we'd be happy to guide you through it.
 
-As mentioned in the [FAQ](https://www.infracost.io/docs/faq), **no** cloud credentials, secrets, tags or resource identifiers are sent to the Cloud Pricing API. That API does not become aware of your cloud spend; it simply returns cloud prices to the CLI so calculations can be done on your machine. Infracost does not make any changes to your Terraform state or cloud resources.
+As mentioned in our [FAQ](https://infracost.io/docs/faq), no cloud credentials or secrets are sent to the Cloud Pricing API. Infracost does not make any changes to your Terraform state or cloud resources.
 
 <img src="screenshot.png" width=557 alt="Example screenshot" />
 
-## Parameters
+## Table of Contents
 
-Parameters can be passed in using the `environment` block of the `Jenkinsfile` file as shown in the Usage section below.
+* [Usage](#usage)
+* [Environment variables](#environment-variables)
+  * [Integration variables](#integration-variables)
+  * [CLI variables](#cli-variables)
+* [Contributing](#contributing)
 
-### `IAC_PATH`
+# Usage
 
-**Optional** Path to the Terraform directory or JSON/plan file. Either `IAC_PATH` or `CONFIG_FILE` is required.
-
-### `TERRAFORM_PLAN_FLAGS`
-
-**Optional** Flags to pass to the 'terraform plan' command, e.g. `"-var-file=my.tfvars -var-file=other.tfvars"`. Applicable when path is a Terraform directory.
-
-### `TERRAFORM_WORKSPACE`
-
-**Optional** The Terraform workspace to use. Applicable when path is a Terraform directory. Only set this for multi-workspace deployments, otherwise it might result in the Terraform error "workspaces not supported".
-
-### `USAGE_FILE`
-
-**Optional** Path to Infracost [usage file](https://www.infracost.io/docs/usage_based_resources#infracost-usage-file) that specifies values for usage-based resources, see [this example file](https://github.com/infracost/infracost/blob/master/infracost-usage-example.yml) for the available options.
-
-### `CONFIG_FILE`
-
-**Optional** If your repo has **multiple Terraform projects or workspaces**, define them in a [config file](https://www.infracost.io/docs/config_file/) and set this input to its path. Their results will be combined into the same diff output. Cannot be used with IAC_PATH, TERRAFORM_PLAN_FLAGS or USAGE_FILE parameters.
-
-### `FAIL_CONDITION`
-
-**Optional** A JSON string describing the condition that causes the pipeline to fail. Currently only one option is supported:
-- `'{"percentage_threshold": 10}'`: absolute percentage threshold that fails the build. For example, set to 10 to fail the build if the cost estimate changes by more than plus or minus 10%.
-
-## Environment variables
-
-This section describes the most common environment variables. Other supported environment variables are described in the [this page](https://www.infracost.io/docs/integrations/environment_variables).
-
-Terragrunt users should also read [this page](https://www.infracost.io/docs/iac_tools/terragrunt). Terraform Cloud/Enterprise users should also read [this page](https://www.infracost.io/docs/iac_tools/terraform_cloud_enterprise).
-
-### `INFRACOST_API_KEY`
-
-**Required** To get an API key [download Infracost](https://www.infracost.io/docs/#installation) and run `infracost register`.
-
-### Cloud credentials
-
-**Required** You do not need to set cloud credentials if you use Terraform Cloud/Enterprise's remote execution mode, instead you should follow [this page](https://www.infracost.io/docs/iac_tools/terraform_cloud_enterprise).
-
-For all other users, the following is needed so Terraform can run `init`:
-- AWS users should set `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`.
-- GCP users should set `GOOGLE_CREDENTIALS` or read [this section](https://registry.terraform.io/providers/hashicorp/google/latest/docs/guides/provider_reference#full-reference) of the Terraform docs for other options.
-
-### `INFRACOST_TERRAFORM_BINARY`
-
-**Optional** Used to change the path to the `terraform` binary or version, see [this page](https://www.infracost.io/docs/integrations/environment_variables/#cicd-integrations) for the available options.
-
-### `GIT_SSH_KEY`
-
-**Optional** If you're using Terraform modules from private Git repositories you can set this environment variable to your private Git SSH key so Terraform can access your module.
-
-## Usage
-
-1. Create a new credential in Jenkins' management panel, called `jenkins-infracost-api-key`, and enter your Infracost API key. To get an API key [download Infracost](https://www.infracost.io/docs/#installation) and run `infracost register`.
+1. Create a new credential in Jenkins' management panel, called `jenkins-infracost-api-key`, and enter your Infracost API key. To get an API key [download Infracost](https://www.infracost.io/docs/#quick-start) and run `infracost register`.
 
 2. Install the Jenkins [HTML Publisher plugin](https://plugins.jenkins.io/htmlpublisher/). This is used to output the diff result in an HTML file.
 
@@ -114,9 +67,67 @@ For all other users, the following is needed so Terraform can run `init`:
 
 4. Push a change to your project or manually trigger a run; the Infracost Diff Output menu option should appear in your Jenkins project. Check the build Console Output and [this page](https://www.infracost.io/docs/integrations/cicd#cicd-troubleshooting) if there are issues.
 
+# Environment variables
+
+There are two sets of environment variables: ones that are used by this integration, and ones that are used by the Infracost CLI. Both can be specified in the `environment` block of your `Jenkinsfile` file as shown in the Usage section above.
+
+## Integration variables
+
+### `IAC_PATH`
+
+**Optional** Path to the Terraform directory or JSON/plan file. Either `IAC_PATH` or `CONFIG_FILE` is required.
+
+### `TERRAFORM_PLAN_FLAGS`
+
+**Optional** Flags to pass to the 'terraform plan' command, e.g. `"-var-file=my.tfvars -var-file=other.tfvars"`. Applicable when path is a Terraform directory.
+
+### `TERRAFORM_WORKSPACE`
+
+**Optional** The Terraform workspace to use. Applicable when path is a Terraform directory. Only set this for multi-workspace deployments, otherwise it might result in the Terraform error "workspaces not supported".
+
+### `USAGE_FILE`
+
+**Optional** Path to Infracost [usage file](https://www.infracost.io/docs/usage_based_resources#infracost-usage-file) that specifies values for usage-based resources, see [this example file](https://github.com/infracost/infracost/blob/master/infracost-usage-example.yml) for the available options.
+
+### `CONFIG_FILE`
+
+**Optional** If your repo has **multiple Terraform projects or workspaces**, define them in a [config file](https://www.infracost.io/docs/config_file/) and set this input to its path. Their results will be combined into the same diff output. Cannot be used with IAC_PATH, TERRAFORM_PLAN_FLAGS or USAGE_FILE parameters.
+
+### `FAIL_CONDITION`
+
+**Optional** A JSON string describing the condition that causes the pipeline to fail. Currently only one option is supported:
+- `'{"percentage_threshold": 10}'`: absolute percentage threshold that fails the build. For example, set to 10 to fail the build if the cost estimate changes by more than plus or minus 10%.
+
+### `GIT_SSH_KEY`
+
+**Optional** If you're using Terraform modules from private Git repositories you can set this environment variable to your private Git SSH key so Terraform can access your module.
+
+## CLI variables
+
+This section describes the main environment variables that can be used with the Infracost CLI. Other supported environment variables are described in the [this page](https://www.infracost.io/docs/integrations/environment_variables).
+
+Terragrunt users should also read [this page](https://www.infracost.io/docs/iac_tools/terragrunt). Terraform Cloud/Enterprise users should also read [this page](https://www.infracost.io/docs/iac_tools/terraform_cloud_enterprise).
+
+### `INFRACOST_API_KEY`
+
+**Required** To get an API key [download Infracost](https://www.infracost.io/docs/#quick-start) and run `infracost register`.
+
+### Cloud credentials
+
+**Required** You do not need to set cloud credentials if you use Terraform Cloud/Enterprise's remote execution mode, instead you should follow [this page](https://www.infracost.io/docs/iac_tools/terraform_cloud_enterprise).
+
+For all other users, the following is needed so Terraform can run `init`:
+- Azure users should read [this section](https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/guides/service_principal_client_secret) to see which environment variables work for their use-case.
+- AWS users should set `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, or read [this section](https://registry.terraform.io/providers/hashicorp/aws/latest/docs#environment-variables) of the Terraform docs for other options.
+- GCP users should set `GOOGLE_CREDENTIALS`, or read [this section](https://registry.terraform.io/providers/hashicorp/google/latest/docs/guides/provider_reference#full-reference) of the Terraform docs for other options.
+
+### `INFRACOST_TERRAFORM_BINARY`
+
+**Optional** Used to change the path to the `terraform` binary or version, see [this page](https://www.infracost.io/docs/integrations/environment_variables/#cicd-integrations) for the available options.
+
 ## Contributing
 
-Merge requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
+Issues and pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
 
 ## License
 

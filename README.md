@@ -93,6 +93,10 @@ There are two sets of environment variables: ones that are used by this integrat
 
 **Optional** If your repo has **multiple Terraform projects or workspaces**, define them in a [config file](https://www.infracost.io/docs/config_file/) and set this input to its path. Their results will be combined into the same diff output. Cannot be used with IAC_PATH, TERRAFORM_PLAN_FLAGS or USAGE_FILE parameters.
 
+### `SHOW_SKIPPED`
+
+**Optional** Show unsupported resources, some of which might be free, at the bottom of the Infracost output (default is false).
+
 ### `FAIL_CONDITION`
 
 **Optional** A JSON string describing the condition that causes the pipeline to fail. Currently only one option is supported:
@@ -101,6 +105,10 @@ There are two sets of environment variables: ones that are used by this integrat
 ### `GIT_SSH_KEY`
 
 **Optional** If you're using Terraform modules from private Git repositories you can set this environment variable to your private Git SSH key so Terraform can access your module.
+
+### `SLACK_WEBHOOK_URL`
+
+**Optional** Set this to also post the pull request comment to a [Slack Webhook](https://slack.com/intl/en-tr/help/articles/115005265063-Incoming-webhooks-for-Slack), which should post it in the corresponding Slack channel.
 
 ## CLI variables
 

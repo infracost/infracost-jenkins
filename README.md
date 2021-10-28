@@ -97,6 +97,10 @@ There are two sets of environment variables: ones that are used by this integrat
 
 **Optional** Show unsupported resources, some of which might be free, at the bottom of the Infracost output (default is false).
 
+## `SYNC_USAGE_FILE` (experimental)
+
+**Optional**  If set to `true` this will create or update the usage file with missing resources, either using zero values or pulling data from AWS CloudWatch. For more information see the [Infracost docs here](https://www.infracost.io/docs/usage_based_resources#1-generate-usage-file). You must also specify the `usage_file` input if this is set to `true`.
+
 ### `FAIL_CONDITION`
 
 **Optional** A JSON string describing the condition that causes the pipeline to fail. Currently only one option is supported:

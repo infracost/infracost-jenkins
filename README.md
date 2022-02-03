@@ -65,7 +65,7 @@ As mentioned in our [FAQ](https://infracost.io/docs/faq), no cloud credentials o
     }
     ```
 
-4. Push a change to your project or manually trigger a run; the Infracost Diff Output menu option should appear in your Jenkins project. Check the build Console Output and [this page](https://www.infracost.io/docs/integrations/cicd#cicd-troubleshooting) if there are issues.
+4. Push a change to your project or manually trigger a run; the Infracost Diff Output menu option should appear in your Jenkins project. Check the build Console Output and [this page](https://www.infracost.io/docs/troubleshooting/) if there are issues.
 
 # Environment variables
 

@@ -1,5 +1,7 @@
 # Infracost Jenkins
 
+👉👉👉 We haven't updated this repo to use the new `infracost comment` command yet (we'll get to it soon). We recommend you follow [these instructions](https://www.infracost.io/docs/integrations/cicd/#my-cicd-system-isnt-supported) if you'd like to see cost estimate comments in pull requests.
+
 This repo shows how Infracost can be used with Jenkins. Given the variety of workflows in Jenkins, this repo currently shows how a stage can be added to pipelines to generate an HTML page for each run, to show the Infracost diff output. It uses Jenkins' docker agent to run Infracost's [`jenkins_diff.sh`](https://github.com/infracost/infracost/blob/master/scripts/ci/jenkins_diff.sh) and was also tested using the [`docker:dind` image](https://www.jenkins.io/doc/book/installing/docker/#on-macos-and-linux) (docker in docker). Use this as a template that can be customized based on your requirements. See [this repo for a demo](https://github.com/infracost/jenkins-demo).
 
 This integration uses the latest version of Infracost by default as we regularly add support for more cloud resources. If you run into any issues, please join our [community Slack channel](https://www.infracost.io/community-chat); we'd be happy to guide you through it.

@@ -59,6 +59,7 @@ pipeline {
                 // Generate Infracost JSON output, the following docs might be useful:
                 // Multi-project/workspaces: https://www.infracost.io/docs/features/config_file
                 // Combine Infracost JSON files: https://www.infracost.io/docs/features/cli_commands/#combined-output-formats
+                // Environment variables: https://www.infracost.io/docs/integrations/environment_variables/
                 sh 'infracost breakdown --path plan.json --format json --out-file infracost.json'
 
                 // IMPORTANT: update this depending on which VCS provider you use and which plugin you are using.

@@ -74,6 +74,8 @@ pipeline {
 
 3. 🎉 That's it! Send a new pull request to change something in Terraform that costs money. You should see a merge request comment that gets updated, e.g. the 📉 and 📈 emojis will update as changes are pushed! Check the build Console Output and [this page](https://www.infracost.io/docs/troubleshooting/) if there are issues.
 
+4. Follow [the docs](https://www.infracost.io/usage-file) if you'd also like to show cost for of usage-based resources such as AWS Lambda or S3. The usage for these resources are fetched from CloudWatch/cloud APIs and used to calculate an estimate.
+
 ## Comment options
 
 For different commenting options `infracost comment` command supports the following flags:

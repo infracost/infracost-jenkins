@@ -1,0 +1,106 @@
+pipeline {
+  agent any
+  environment {
+    PATH = "/usr/local/bin/:$PATH"
+  }
+  stages {
+    stage('Init'){
+        steps {
+            dir('./terraform/account'){
+                sh 'terraform init'
+            }
+            
+        }
+    }
+    stage('Plan'){
+        steps {
+             dir('./terraform/account'){
+                script {
+                    planExitCode = sh(
+                        script: 'terraform plan -detailed-exitcode -out tfplan.binary',
+                        returnStatus: true
+                    )                    
+                    if (planExitCode == 1){
+                      currentBuild.result = "FAILURE"
+                      throw new Exception("Throw to stop pipeline")
+                    }
+                }
+             }
+        }
+    }
+    stage('Infracost'){
+      agent {
+        docker {
+            // Always use the latest 0.9.x version to pick up bug fixes and new resources.
+            // See https://www.infracost.io/docs/integrations/cicd/#docker-images for other options
+            image 'infracost/infracost:ci-0.9'
+            args "--user=root --entrypoint=''"
+            reuseNode true
+        }
+      }
+      environment {
+          // credentials declared in jenkins UI
+          INFRACOST_API_KEY = credentials('INFRACOST_API_KEY')
+          // path to usage file (if using)
+          USAGE_FILE = '/tmp/infracost-usage.yml'
+          SYNC_USAGE_FILE = true          
+      }
+      steps {
+        dir('./terraform/account'){ // directory terraform is initialised in
+          // path is current directory, set an informative label
+          sh script:'infracost breakdown --path . --terraform-parse-hcl', label: "Infracost output"
+        }
+      }
+    }
+    stage('Deploy') {
+      parallel {
+        stage('1'){
+          stages{
+            stage('Verify'){
+              when {
+                expression { planExitCode == 2 }
+                beforeInput true
+              }
+              input {
+                message "Verify plan output and confirm ok"
+              }
+              steps {
+                echo "Plan verified"
+              }
+            }
+            stage('Apply'){
+              when {
+                anyOf {
+                  expression { planExitCode == 2 }
+                  expression { forceapply == 'true' }
+                }
+                beforeInput true
+              }
+              steps {
+                dir('./terraform/account'){
+                  sh 'terraform apply tfplan.binary'
+                }
+              }
+            }
+          }
+        }
+        stage('2'){
+          stages{
+            stage('No changes'){
+              when {
+                expression { planExitCode == 0 }
+              }                          
+              steps {
+                echo 'No changes to be made, infrastructure up to date'
+		// Run a refresh to ensure outputs are up-to-date
+		dir('./terraform/account'){
+		  sh 'terraform refresh'
+		}
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

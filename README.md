@@ -34,7 +34,7 @@ pipeline {
                 // Clone the base branch of the pull request (e.g. main/master) into a temp directory.
                 sh 'git clone $GIT_URL --branch=$CHANGE_TARGET --single-branch /tmp/base'
 
-                // Generate Infracost JSON file as the baseline.
+                // Generate Infracost JSON file as the baseline, add any required sub-directories to path, e.g. `/tmp/base/PATH/TO/TERRAFORM/CODE`.
                 sh 'infracost breakdown --path=/tmp/base \
                                         --format=json \
                                         --out-file=/tmp/infracost-base.json'

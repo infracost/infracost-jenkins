@@ -7,9 +7,13 @@ This project provides instructions for using Infracost in a Jenkins pipeline. Th
 ## Quick start
 
 
-1. Create a new credential in Jenkins' management panel, called `jenkins-infracost-api-key`, and enter your Infracost API key. To get an API key [download Infracost](https://www.infracost.io/docs/#quick-start) and run `infracost register`.
+1. If you haven't done so already, [download Infracost](https://www.infracost.io/docs/#quick-start) and run `infracost auth login` to get a free API key.
 
-2. Create a new file at `Jenkinsfile` in your repo with the following content and update it to match your environment.
+2. Retrieve your Infracost API key by running `infracost configure get api_key`.
+
+3. Create a new credential in Jenkins' management panel, called `jenkins-infracost-api-key`, and enter your Infracost API key.
+
+4. Create a new file at `Jenkinsfile` in your repo with the following content and update it to match your environment.
 
 ```
 pipeline {
@@ -28,6 +32,11 @@ pipeline {
             // Set up any required credentials for posting the comment, e.g. GitHub token, GitLab token
             environment {
                 INFRACOST_API_KEY = credentials('jenkins-infracost-api-key')
+                // If you're using Terraform Cloud/Enterprise and have variables or private modules stored
+                // on there, specify the following to automatically retrieve the variables:
+                // INFRACOST_TERRAFORM_CLOUD_TOKEN: credentials('jenkins-infracost-tfc-token')
+                // Change this if you're using Terraform Enterprise
+                // INFRACOST_TERRAFORM_CLOUD_HOST: app.terraform.io
             }
 
             steps {
@@ -52,20 +61,29 @@ pipeline {
                 //   hide-and-new - Minimize previous comments and create a new one.
                 //   new - Create a new cost estimate comment on every push.
                 // See https://www.infracost.io/docs/features/cli_commands/#comment-on-pull-requests for other options.
-                sh 'infracost comment github --path=/tmp/infracost.json \
-                                             --repo=$GITHUB_REPO \
-                                             --pull-request=$GITHUB_PULL_REQUEST_NUMBER \
-                                             --github-token=$GITHUB_TOKEN \
-                                             --behavior=update'
+                // The INFRACOST_ENABLE_CLOUD​=true section instructs the CLI to send its JSON output to Infracost Cloud.
+                //   This SaaS product gives you visibility across all changes in a dashboard. The JSON output does not
+                //   contain any cloud credentials or secrets.
+                sh 'INFRACOST_ENABLE_CLOUD​=true infracost comment github --path=/tmp/infracost.json \
+                                                                          --repo=$GITHUB_REPO \
+                                                                          --pull-request=$GITHUB_PULL_REQUEST_NUMBER \
+                                                                          --github-token=$GITHUB_TOKEN \
+                                                                          --behavior=update'
             }
         }
     }
 }
 ```
 
-3. 🎉 That's it! Send a new pull request to change something in Terraform that costs money. You should see a merge request comment that gets updated, e.g. the 📉 and 📈 emojis will update as changes are pushed! Check the build Console Output and [this page](https://www.infracost.io/docs/troubleshooting/) if there are issues.
+5. 🎉 That's it! Send a new pull request to change something in Terraform that costs money. You should see a pull request comment that gets updated, e.g. the 📉 and 📈 emojis will update as changes are pushed! Check the build Console Output and [this page](https://www.infracost.io/docs/troubleshooting/) if there are issues.
 
-4. Follow [the docs](https://www.infracost.io/usage-file) if you'd also like to show cost for of usage-based resources such as AWS Lambda or S3. The usage for these resources are fetched from CloudWatch/cloud APIs and used to calculate an estimate.
+    <img src=".github/assets/pr-comment.png" alt="Example pull request" width="70%" />
+
+6. To see the test pull request costs in Infracost Cloud, [log in](https://dashboard.infracost.io/) > switch to your organization > Projects. To learn more, see [our docs](https://www.infracost.io/docs/infracost_cloud/get_started/).
+
+    <img src=".github/assets/infracost-cloud-runs.png" alt="Infracost Cloud gives team leads, managers and FinOps practitioners to have visibility across all cost estimates in CI/CD" width="90%" />
+   
+7. Follow [the docs](https://www.infracost.io/usage-file) if you'd also like to show cost for of usage-based resources such as AWS Lambda or S3. The usage for these resources are fetched from CloudWatch/cloud APIs and used to calculate an estimate.
 
 ## Private Terraform modules
 

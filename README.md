@@ -37,6 +37,15 @@ pipeline {
                 //  The cost estimates are transmitted in JSON format and do not contain any cloud 
                 //  credentials or secrets (see https://infracost.io/docs/faq/ for more information).
                 INFRACOST_ENABLE_CLOUD = 'true'
+                // The following environment variables are required to show Jenkins PRs on Infracost Cloud.
+                //  These are the minimum required, and you should alter to conform to your specific setup.
+                //  To read more about additional environment variables you can use to customize Infracost Cloud,
+                //  visit here: https://www.infracost.io/docs/features/environment_variables/#when-a-pull-request-exists
+                INFRACOST_VCS_PROVIDER = 'github'
+                INFRACOST_VCS_REPOSITORY_URL = '$GIT_URL'
+                INFRACOST_VCS_PULL_REQUEST_URL = '$CHANGE_URL'
+                INFRACOST_VCS_PULL_REQUEST_AUTHOR = '$CHANGE_AUTHOR'
+                INFRACOST_VCS_PULL_REQUEST_TITLE = '$CHANGE_TITLE'
                 // If you're using Terraform Cloud/Enterprise and have variables or private modules stored
                 // on there, specify the following to automatically retrieve the variables:
                 // INFRACOST_TERRAFORM_CLOUD_TOKEN: credentials('jenkins-infracost-tfc-token')

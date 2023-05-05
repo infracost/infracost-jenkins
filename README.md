@@ -35,12 +35,15 @@ pipeline {
                 // The following environment variables are required to show Jenkins PRs on Infracost Cloud.
                 //  These are the minimum required, and you should alter to conform to your specific setup.
                 //  To read more about additional environment variables you can use to customize Infracost Cloud,
-                //  visit here: https://www.infracost.io/docs/features/environment_variables/#when-a-pull-request-exists
+                //  visit here: https://www.infracost.io/docs/features/environment_variables/#environment-variables-to-set-metadata
                 INFRACOST_VCS_PROVIDER = 'github'
-                INFRACOST_VCS_REPOSITORY_URL = '$GIT_URL'
-                INFRACOST_VCS_PULL_REQUEST_URL = '$CHANGE_URL'
-                INFRACOST_VCS_PULL_REQUEST_AUTHOR = '$CHANGE_AUTHOR'
-                INFRACOST_VCS_PULL_REQUEST_TITLE = '$CHANGE_TITLE'
+                INFRACOST_VCS_REPOSITORY_URL = 'https://github.com/infracost/example-terraform'
+                INFRACOST_VCS_PULL_REQUEST_URL = 'https://github.com/alikhajeh1/example-terraform/pull/22'
+                INFRACOST_VCS_PULL_REQUEST_AUTHOR = 'John Smith'
+                INFRACOST_VCS_PULL_REQUEST_TITLE = 'Change instance type'
+                INFRACOST_VCS_BRANCH = 'bump-instances'
+                INFRACOST_VCS_BASE_BRANCH = 'main'
+                INFRACOST_VCS_COMMIT_SHA = '47d54ead06ff66d22369424e4142d74a01c30e66'
                 // If you're using Terraform Cloud/Enterprise and have variables or private modules stored
                 // on there, specify the following to automatically retrieve the variables:
                 // INFRACOST_TERRAFORM_CLOUD_TOKEN: credentials('jenkins-infracost-tfc-token')

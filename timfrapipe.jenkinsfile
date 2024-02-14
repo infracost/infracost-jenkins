@@ -121,11 +121,16 @@ pipeline {
                                                 --github-api-url=$GITHUB_API_URL \
                                                 --github-token=$GITHUB_TOKEN \
                                                 --behavior=update \
-                                                --format=json || true',
+                                                --format=json \
+                                                2> commentErrOut.txt \
+                                                || true',
                       returnStdout: true,
                     )
+                    def commentErrOut = readFile('commentErrOut.txt').trim()
+                    def commentUrl = commentErrOut.find(/[^\s]+#commitcomment[^\s]+/)
                     def commentDetails = readJSON text: commentOutput
-                    def infracostReport = "########## See Infracost branch diff ##########\n${commentDetails.cloudUrl}\n##########"
+
+                    def infracostReport = "########## See Infracost branch diff ##########\n${commentUrl}\n##########"
                     echo infracostReport
                     writeFile file: 'infracost.txt', text: infracostReport
                     archiveArtifacts artifacts: 'infracost.txt'

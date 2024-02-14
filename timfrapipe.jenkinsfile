@@ -34,7 +34,11 @@ pipeline {
                   env.GITHUB_API_URL = 'https://api.github.com'
                   env.REPO_NAME = "${params.REPO_NAME}"
                   env.BRANCH_NAME = "${params.BRANCH_NAME}"
-                  env.TF_VAR_FILE = "${params.TF_VAR_FILE}"
+                  env.TF_VAR_FILE = "${params.TF_VAR_FILE ?: ''}"
+
+                  if (env.TF_VAR_FILE && !fileExists(env.TF_VAR_FILE)) {
+                     error("TF_VAR_FILE '${env.TF_VAR_FILE}' was specified but does not exist")
+                  }
                 }
 
                 script {

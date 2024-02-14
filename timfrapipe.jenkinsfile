@@ -25,7 +25,8 @@ pipeline {
                 INFRACOST_API_KEY = credentials('infracost-api-key')
                 LOG_LEVEL = 'warn'
                 GITHUB_TOKEN = credentials('github-token')
-                GITHUB_URL = 'github.com'
+                GITHUB_URL = 'https://github.com'
+                GITHUB_API_URL = 'https://api.github.com'
                 REPO_NAME = "${params.REPO_NAME}"
                 BRANCH_NAME = "${params.BRANCH_NAME}"
                 TF_VAR_FILE = "${params.TF_VAR_FILE}"
@@ -35,7 +36,7 @@ pipeline {
 
                 script {
                     // Get the default branch of the repository
-                    def repoApiUrl = "https://api.${env.GITHUB_URL}/repos/${env.REPO_NAME}"
+                    def repoApiUrl = "${env.GITHUB_API_URL}/repos/${env.REPO_NAME}"
                     echo "Getting repo details from GitHub API: ${repoApiUrl}"
                     def repoOutput = sh(script: 'curl -s -H \"Authorization: token $GITHUB_TOKEN\" \"' + repoApiUrl + '\"', returnStdout: true).trim()
                     def repoDetails = readJSON text: repoOutput
@@ -43,13 +44,13 @@ pipeline {
                     env.DEFAULT_BRANCH = defaultBranch
 
                     // Call GitHub API to get branch details
-                    def branchApiUrl = "https://api.${env.GITHUB_URL}/repos/${env.REPO_NAME}/branches/${env.BRANCH_NAME}"
+                    def branchApiUrl = "${env.GITHUB_API_URL}/repos/${env.REPO_NAME}/branches/${env.BRANCH_NAME}"
                     echo "Getting branch details from GitHub API: ${branchApiUrl}"
                     def output = sh(script: 'curl -s -H \"Authorization: token $GITHUB_TOKEN\" \"' + branchApiUrl + '\"', returnStdout: true).trim()
                     def branchDetails = readJSON text: output
 
                     // Set branch and repository environment variables
-                    env.INFRACOST_VCS_REPOSITORY_URL = "https://github.com/${env.REPO_NAME}"
+                    env.INFRACOST_VCS_REPOSITORY_URL = "${GITHUB_URL}/${env.REPO_NAME}"
                     env.INFRACOST_VCS_BRANCH = env.BRANCH_NAME
                     env.INFRACOST_VCS_COMMIT_SHA = branchDetails.commit.sha
                     env.INFRACOST_VCS_COMMIT_AUTHOR_NAME = branchDetails.commit.commit.author.name
@@ -71,7 +72,7 @@ pipeline {
                     env.INFRACOST_VCS_BASE_BRANCH = env.DEFAULT_BRANCH
 
                     // Get the merge base SHA using GitHub API
-                    def mergeBaseApiUrl = "https://api.${env.GITHUB_URL}/repos/${env.REPO_NAME}/compare/${env.DEFAULT_BRANCH}...${env.BRANCH_NAME}"
+                    def mergeBaseApiUrl = "${env.GITHUB_API_URL}/repos/${env.REPO_NAME}/compare/${env.DEFAULT_BRANCH}...${env.BRANCH_NAME}"
                     echo "Getting merge base details from GitHub API: ${mergeBaseApiUrl}"
                     def mergeBaseOutput = sh(script: 'curl -s -H \"Authorization: token $GITHUB_TOKEN\" \"' + mergeBaseApiUrl + '\"', returnStdout: true).trim()
                     def mergeBaseDetails = readJSON text: mergeBaseOutput
@@ -80,7 +81,7 @@ pipeline {
                     echo "Found merge base SHA: ${mergeBaseSha}"
 
                     // Clone the repository to a temporary directory
-                    sh "git clone https://github.com/${env.REPO_NAME}.git /tmp/repo"
+                    sh "git clone ${GITHUB_URL}/${env.REPO_NAME}.git /tmp/repo"
 
                     // Checkout the merge base commit
                     sh "cd /tmp/repo && git checkout -q ${mergeBaseSha}"
@@ -110,7 +111,7 @@ pipeline {
                       script: 'infracost comment github --path=/tmp/infracost.json \
                                                 --repo=$REPO_NAME \
                                                 --commit=$INFRACOST_VCS_COMMIT_SHA \
-                                                --github-api-url=https://api.$GITHUB_URL \
+                                                --github-api-url=$GITHUB_API_URL \
                                                 --github-token=$GITHUB_TOKEN \
                                                 --behavior=update \
                                                 --format=json || true',
@@ -142,7 +143,7 @@ pipeline {
                     echo "Generating Infracost baseline for default branch"
 
                     // Clone the repository to a temporary directory
-                    sh "git clone https://github.com/${env.REPO_NAME}.git /tmp/repo"
+                    sh "git clone ${GITHUB_URL}/${env.REPO_NAME}.git /tmp/repo"
 
                     // Checkout the default branch
                     sh "cd /tmp/repo && git checkout ${env.DEFAULT_BRANCH}"

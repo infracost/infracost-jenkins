@@ -16,7 +16,7 @@ pipeline {
                     // Always use the latest 0.10.x version to pick up bug fixes and new resources.
                     // See https://www.infracost.io/docs/integrations/cicd/#docker-images for other options
                     image 'infracost/infracost:ci-0.10'
-                    args "--user=root --entrypoint=''"
+                    args "--user=root --entrypoint='' --pull"
                 }
             }
 
@@ -112,17 +112,19 @@ pipeline {
                                                 --github-api-url=https://api.$GITHUB_URL \
                                                 --github-token=$GITHUB_TOKEN \
                                                 --behavior=update \
-                                                2>&1',
+                                                --format=json || true',
                       returnStdout: true,
                     )
-                    echo "${commentOutput.trim()}"
+                    def commentDetails = readJSON text: commentOutput
+                    def infracostReport = "########## See Infracost branch diff ##########\n${commentDetails.cloudUrl}\n##########"
+                    echo infracostReport
+                    writeFile file: 'infracost.txt', text: infracostReport
+                    archiveArtifacts artifacts: 'infracost.txt'
 
-                    def matcher = commentOutput =~ /https:\/\/[^\s]+#commitcomment[^\s]+/
-                    if (matcher) {
-                      echo "##### See Infracost report #####\n${matcher[0]}\n#####"
+                    if (commentDetails.governanceFailures != null && !commentDetails.governanceFailures.isEmpty()) {
+                      def failuresList = commentDetails.governanceFailures.collect { it }
+                      error("Governance check failed:\n- ${failuresList.join(' ')}\n")
                     }
-                    // This is needed because Jenkins can't serialize the matcher object
-                    matcher = null
                 }
 
                 script {
@@ -147,7 +149,13 @@ pipeline {
                                             --terraform-var-file=$TF_VAR_FILE'
 
                     // Run Infracost upload
-                    sh "infracost upload --path=/tmp/infracost.json || echo 'Always pass main branch runs even if there are policy failures'"
+                    def uploadOutput = sh( script: "infracost upload --path=/tmp/infracost.json --format=json || true", returnStdout: true )
+                    def uploadDetails = readJSON text: uploadOutput
+                    def infracostReport = "########## See Infracost repo report ##########\n${uploadDetails.cloudUrl}\n##########"
+
+                    echo infracostReport
+                    writeFile file: 'infracost.txt', text: infracostReport
+                    archiveArtifacts artifacts: 'infracost.txt'
                 }
             }
         }

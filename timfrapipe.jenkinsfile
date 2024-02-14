@@ -165,7 +165,8 @@ pipeline {
                     // Run Infracost upload
                     def uploadOutput = sh( script: "infracost upload --path=/tmp/infracost.json --format=json || true", returnStdout: true )
                     def uploadDetails = readJSON text: uploadOutput
-                    def infracostReport = "########## See Infracost repo report ##########\n${uploadDetails.cloudUrl}\n##########"
+                    def repoUrl = uploadDetails.cloudUrl.find(/.*\/repos\/[^\/]+/)
+                    def infracostReport = "########## See Infracost repo report ##########\n${repoUrl}\n##########"
 
                     echo infracostReport
                     writeFile file: 'infracost.txt', text: infracostReport

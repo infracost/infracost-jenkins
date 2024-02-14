@@ -130,7 +130,7 @@ pipeline {
                     writeFile file: 'infracost.txt', text: infracostReport
                     archiveArtifacts artifacts: 'infracost.txt'
 
-                    if (commentDetails.governanceFailures != null && !commentDetails.governanceFailures.isEmpty()) {
+                    if (commentDetails.governanceFailures instanceof List && !commentDetails.governanceFailures.isEmpty()) {
                       failuresList = commentDetails.governanceFailures.collect { it }
                     }
                   } catch (Exception e) {

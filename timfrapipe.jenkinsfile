@@ -61,12 +61,13 @@ pipeline {
                 }
 
                 script {
-                    if (env.BRANCH_NAME == env.DEFAULT_BRANCH) {
-                        // don't create a diff, this is a default branch run
-                        return
-                    }
-                    echo "Generating Infracost baseline from default branch"
-
+                  if (env.BRANCH_NAME == env.DEFAULT_BRANCH) {
+                      // don't create a diff, this is a default branch run
+                      return
+                  }
+                  echo "Generating Infracost baseline from default branch"
+                  def failuresList = null
+                  try {
                     env.INFRACOST_VCS_BASE_BRANCH = env.DEFAULT_BRANCH
 
                     // Get the merge base SHA using GitHub API
@@ -122,17 +123,22 @@ pipeline {
                     archiveArtifacts artifacts: 'infracost.txt'
 
                     if (commentDetails.governanceFailures != null && !commentDetails.governanceFailures.isEmpty()) {
-                      def failuresList = commentDetails.governanceFailures.collect { it }
-                      error("Governance check failed:\n- ${failuresList.join(' ')}\n")
+                      failuresList = commentDetails.governanceFailures.collect { it }
                     }
+                  } catch (Exception e) {
+                    echo "Caught an error: ${e}"
+                  }
+                  if (failuresList != null) {
+                    error("Governance check failed:\n- ${failuresList.join(' ')}\n")
+                  }
                 }
 
                 script {
-                    if (env.BRANCH_NAME != env.DEFAULT_BRANCH) {
-                        // don't upload default branch breakdown, this is a feature branch run
-                        return
-                    }
-
+                  if (env.BRANCH_NAME != env.DEFAULT_BRANCH) {
+                      // don't upload default branch breakdown, this is a feature branch run
+                      return
+                  }
+                  try {
                     echo "Generating Infracost baseline for default branch"
 
                     // Clone the repository to a temporary directory
@@ -156,6 +162,9 @@ pipeline {
                     echo infracostReport
                     writeFile file: 'infracost.txt', text: infracostReport
                     archiveArtifacts artifacts: 'infracost.txt'
+                  } catch (Exception e) {
+                    echo "Caught an error: ${e}"
+                  }
                 }
             }
         }

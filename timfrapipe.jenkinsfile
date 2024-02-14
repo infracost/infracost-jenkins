@@ -22,17 +22,20 @@ pipeline {
 
             // Set up required credentials for posting the comment, e.g. GitHub token, Infracost API key
             environment {
-                INFRACOST_API_KEY = credentials('infracost-api-key')
-                LOG_LEVEL = 'warn'
                 GITHUB_TOKEN = credentials('github-token')
-                GITHUB_URL = 'https://github.com'
-                GITHUB_API_URL = 'https://api.github.com'
-                REPO_NAME = "${params.REPO_NAME}"
-                BRANCH_NAME = "${params.BRANCH_NAME}"
-                TF_VAR_FILE = "${params.TF_VAR_FILE}"
+                INFRACOST_API_KEY = credentials('infracost-api-key')
             }
 
             steps {
+                script {
+                  // Set up required credentials for posting the comment, e.g. GitHub token, Infracost API key
+                  env.LOG_LEVEL = 'warn'
+                  env.GITHUB_URL = 'https://github.com'
+                  env.GITHUB_API_URL = 'https://api.github.com'
+                  env.REPO_NAME = "${params.REPO_NAME}"
+                  env.BRANCH_NAME = "${params.BRANCH_NAME}"
+                  env.TF_VAR_FILE = "${params.TF_VAR_FILE}"
+                }
 
                 script {
                     // Get the default branch of the repository

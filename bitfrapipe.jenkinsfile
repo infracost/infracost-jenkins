@@ -1,0 +1,201 @@
+// Requires Pipeline Utility Steps plugin (https://www.jenkins.io/doc/pipeline/steps/pipeline-utility-steps/)
+
+pipeline {
+    agent any
+
+    parameters {
+        string(name: 'REPO_NAME', description: 'Bitbucket repository name. E.g. ""')
+        string(name: 'BRANCH_NAME', description: 'Bitbucket branch name. E.g. "my_branch"')
+        string(name: 'TF_VAR_FILE', defaultValue: '', description: 'Optional Terraform var file name, relative branch root. E.g. "path/to/my_var_file.tfvars"')
+    }
+
+    stages {
+        stage('infracost') {
+            agent {
+                docker {
+                    // Always use the latest 0.10.x version to pick up bug fixes and new resources.
+                    // See https://www.infracost.io/docs/integrations/cicd/#docker-images for other options
+                    image 'infracost/infracost:ci-0.10'
+                    args "--user=root --entrypoint='' --pull always"
+                }
+            }
+
+            // Set up required credentials for posting the comment, e.g. GitHub token, Infracost API key
+            environment {
+                BITBUCKET_TOKEN = credentials('bitbucket-access-token')
+                INFRACOST_API_KEY = credentials('infracost-api-key')
+            }
+
+            steps {
+                script {
+                    // Set up required credentials for posting the comment, e.g. GitHub token, Infracost API key
+                    env.LOG_LEVEL = 'warn'
+                    env.REPO_NAME = "${params.REPO_NAME}" // <workspace>/<repo>
+                    env.BRANCH_NAME = "${params.BRANCH_NAME}"
+
+                    env.TF_VAR_FILE = "${params.TF_VAR_FILE ?: ''}"
+
+                    env.BITBUCKET_URL = 'https://bitbucket.org' // https://your-bitbucket-server.com
+                    env.BITBUCKET_API_URL = 'https://api.bitbucket.org/2.0'
+                    env.BITBUCKET_GIT_ORIGIN = "${BITBUCKET_URL}/${env.REPO_NAME}" // or a SSH origin like "git@bitbucket.org:/<workspace>/<repo>.git"
+
+                    env.IS_BITBUCKET_CLOUD = env.BITBUCKET_URL == 'https://bitbucket.org'
+
+                    if (env.TF_VAR_FILE && !fileExists(env.TF_VAR_FILE)) {
+                       error("TF_VAR_FILE '${env.TF_VAR_FILE}' was specified but does not exist")
+                    }
+                }
+
+                script {
+                    // setup env necessary for infracost breakdown
+
+                    env.INFRACOST_VCS_PROVIDER = 'bitbucket'
+                    env.INFRACOST_VCS_REPOSITORY_URL = "${env.BITBUCKET_URL}/${env.REPO_NAME}"
+                    env.INFRACOST_VCS_BRANCH = env.BRANCH_NAME
+
+                    def prsOut = sh(script: 'curl --get \
+                            --url "$BITBUCKET_API_URL/repositories/$REPO_NAME/pullrequests" \
+                            --data-urlencode "q=source.branch.name=\\\"$BRANCH_NAME\\\"" \
+                            --header "Authorization: $BITBUCKET_TOKEN" \
+                            --header "Accept: application/json"',
+                        returnStdout: true).trim()
+                    def prsDetails = readJSON text: prsOut
+
+                    if (!prsDetails.values.isEmpty()) {
+                        env.INFRACOST_VCS_PULL_REQUEST_ID = prsDetails.values[0].id
+                        env.INFRACOST_VCS_PULL_REQUEST_URL = prsDetails.values[0].links.self.href
+                        env.INFRACOST_VCS_PULL_REQUEST_HTML_URL = prsDetails.values[0].links.html.href
+                        env.INFRACOST_VCS_PULL_REQUEST_TITLE = prsDetails.values[0].title
+                        env.INFRACOST_VCS_PULL_REQUEST_AUTHOR = prsDetails.values[0].author.nickname
+                        env.INFRACOST_VCS_BASE_BRANCH = prsDetails.values[0].destination.branch.name
+                    }
+                }
+
+                script {
+                    if (!env.INFRACOST_VCS_PULL_REQUEST_URL) {
+                        // this is a branch run and will be handled by the next script block
+                      return
+                    }
+                    def failuresList = null
+                    try {
+                        // find merge base for the PR
+                        def mergeBaseOut = sh(script: 'curl --get \
+                                --url "$BITBUCKET_API_URL/repositories/$REPO_NAME/merge-base/$INFRACOST_VCS_BASE_BRANCH..$INFRACOST_VCS_BRANCH" \
+                                --header "Authorization: $BITBUCKET_TOKEN" \
+                                --header "Accept: application/json"',
+                            returnStdout: true).trim()
+                        def mergeBaseDetails = readJSON text: mergeBaseOut
+                        def mergeBaseSha = mergeBaseDetails.hash
+
+                        echo "Found merge base SHA: ${mergeBaseSha}"
+
+                        // Clone the repository to a temporary directory
+                        sh "git clone $BITBUCKET_GIT_ORIGIN /tmp/repo"
+
+                        echo "Generating Infracost baseline from merge base"
+
+                        // Checkout the merge base commit
+                        sh "cd /tmp/repo && git checkout -q ${mergeBaseSha}"
+
+                        sh 'infracost breakdown --path=/tmp/repo \
+                            --format=json \
+                            --out-file=/tmp/infracost-base.json \
+                            --log-level=$LOG_LEVEL \
+                            --terraform-var-file=$TF_VAR_FILE'
+
+                        echo "Generating Infracost diff"
+
+                        sh "cd /tmp/repo && git checkout ${env.INFRACOST_VCS_BRANCH}"
+
+                        // Generate an Infracost diff and save it to a JSON file.
+                        sh 'infracost diff --path=/tmp/repo \
+                                --format=json \
+                                --compare-to=/tmp/infracost-base.json \
+                                --out-file=/tmp/infracost.json \
+                                --log-level=$LOG_LEVEL \
+                                --terraform-var-file=$TF_VAR_FILE'
+
+                        echo "Generating Infracost comment"
+
+                        // Post PR comment and upload the infracost.json file to Infracost Cloud
+                        def commentOutput = sh(
+                            script: 'infracost comment bitbucket --path=/tmp/infracost.json \
+                                    --repo=$REPO_NAME \
+                                    --pull-request=$INFRACOST_VCS_PULL_REQUEST_ID \
+                                    --bitbucket-server-url=$BITBUCKET_URL \
+                                    --bitbucket-token=$BITBUCKET_TOKEN \
+                                    --behavior=update \
+                                    --format=json \
+                                    --exclude-cli-output \
+                                    2> commentErrOut.txt \
+                                    || true',
+                            returnStdout: true,
+                        )
+                        def commentErrOut = readFile('commentErrOut.txt').trim()
+                        echo commentErrOut
+
+                        def commentAnchor = ""
+                        def commentMatch = commentErrOut =~ /\/comments\/([^\s]+)/
+                        if (commentMatch) {
+                            commentAnchor = "#comment-${commentMatch[0][1]}"
+                        }
+                        commentMatch = null // This is needed because Jenkins can't serialize the matcher object
+
+                        def commentUrl = "${env.INFRACOST_VCS_PULL_REQUEST_HTML_URL}${commentAnchor}"
+                        def commentDetails = readJSON text: commentOutput
+
+                        def infracostReport = "########## See Infracost branch diff ##########\n${commentUrl}\n##########"
+                        echo infracostReport
+                        writeFile file: 'infracost.txt', text: infracostReport
+                        archiveArtifacts artifacts: 'infracost.txt'
+
+                        if (commentDetails.governanceFailures instanceof List && !commentDetails.governanceFailures.isEmpty()) {
+                           failuresList = commentDetails.governanceFailures.collect { it }
+                        }
+                    } catch (Exception e) {
+                        echo "Caught an error: ${e}"
+                    }
+                    if (failuresList != null) {
+                        error("Governance check failed:\n- ${failuresList.join(' ')}\n")
+                    }
+                }
+
+                script {
+                    if (env.INFRACOST_VCS_PULL_REQUEST_URL) {
+                        // this is a PR run and has been handled by the previous script block
+                        return
+                    }
+
+                    try {
+                        echo "Generating Infracost baseline for default branch"
+
+                        // Clone the repository to a temporary directory
+                        sh "git clone $BITBUCKET_GIT_ORIGIN /tmp/repo"
+
+                        // Checkout the default branch
+                        sh "cd /tmp/repo && git checkout ${env.BRANCH_NAME}"
+
+                        // Run Infracost breakdown
+                        sh 'infracost breakdown --path=/tmp/repo \
+                                --format=json \
+                                --out-file=/tmp/infracost.json \
+                                --log-level=$LOG_LEVEL \
+                                --terraform-var-file=$TF_VAR_FILE'
+
+                        // Run Infracost upload
+                        def uploadOutput = sh( script: "infracost upload --path=/tmp/infracost.json --format=json || true", returnStdout: true )
+                        def uploadDetails = readJSON text: uploadOutput
+                        def repoUrl = uploadDetails.cloudUrl.find(/.*\/repos\/[^\/]+/)
+                        def infracostReport = "########## See Infracost repo report ##########\n${repoUrl}\n##########"
+
+                        echo infracostReport
+                        writeFile file: 'infracost.txt', text: infracostReport
+                        archiveArtifacts artifacts: 'infracost.txt'
+                    } catch (Exception e) {
+                       echo "Caught an error: ${e}"
+                    }
+                }
+            }
+        }
+    }
+}

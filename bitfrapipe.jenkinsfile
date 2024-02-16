@@ -22,7 +22,7 @@ pipeline {
 
             // Set up required credentials for posting the comment, e.g. GitHub token, Infracost API key
             environment {
-                BITBUCKET_TOKEN = credentials('bitbucket-access-token')
+                BITBUCKET_TOKEN = credentials('bitbucket-access-token') // "<username>:<app password>".  needs permissions for pullrequests write
                 INFRACOST_API_KEY = credentials('infracost-api-key')
             }
 
@@ -53,21 +53,42 @@ pipeline {
                     env.INFRACOST_VCS_REPOSITORY_URL = "${env.BITBUCKET_URL}/${env.REPO_NAME}"
                     env.INFRACOST_VCS_BRANCH = env.BRANCH_NAME
 
-                    def prsOut = sh(script: 'curl --get \
-                            --url "$BITBUCKET_API_URL/repositories/$REPO_NAME/pullrequests" \
-                            --data-urlencode "q=source.branch.name=\\\"$BRANCH_NAME\\\"" \
-                            --header "Authorization: $BITBUCKET_TOKEN" \
-                            --header "Accept: application/json"',
-                        returnStdout: true).trim()
-                    def prsDetails = readJSON text: prsOut
+                    if (env.IS_BITBUCKET_CLOUD) {
+                        // look up PR details using the Bitbucket cloud REST API
+                        def prsOut = sh(script: 'curl -sS --get \
+                                --url "$BITBUCKET_API_URL/repositories/$REPO_NAME/pullrequests" \
+                                --data-urlencode "q=source.branch.name=\\\"$BRANCH_NAME\\\"" \
+                                --header "Authorization: $BITBUCKET_TOKEN" \
+                                --header "Accept: application/json"',
+                            returnStdout: true).trim()
+                        def prsDetails = readJSON text: prsOut
 
-                    if (!prsDetails.values.isEmpty()) {
-                        env.INFRACOST_VCS_PULL_REQUEST_ID = prsDetails.values[0].id
-                        env.INFRACOST_VCS_PULL_REQUEST_URL = prsDetails.values[0].links.self.href
-                        env.INFRACOST_VCS_PULL_REQUEST_HTML_URL = prsDetails.values[0].links.html.href
-                        env.INFRACOST_VCS_PULL_REQUEST_TITLE = prsDetails.values[0].title
-                        env.INFRACOST_VCS_PULL_REQUEST_AUTHOR = prsDetails.values[0].author.nickname
-                        env.INFRACOST_VCS_BASE_BRANCH = prsDetails.values[0].destination.branch.name
+                        if (!prsDetails.values.isEmpty()) {
+                            env.INFRACOST_VCS_PULL_REQUEST_ID = prsDetails.values[0].id
+                            env.INFRACOST_VCS_PULL_REQUEST_URL = prsDetails.values[0].links.self.href
+                            env.INFRACOST_VCS_PULL_REQUEST_HTML_URL = prsDetails.values[0].links.html.href
+                            env.INFRACOST_VCS_PULL_REQUEST_TITLE = prsDetails.values[0].title
+                            env.INFRACOST_VCS_PULL_REQUEST_AUTHOR = prsDetails.values[0].author.nickname
+                            env.INFRACOST_VCS_BASE_BRANCH = prsDetails.values[0].destination.branch.name
+                        }
+                    } else {
+                        // look up PR details using the Bitbucket server REST API
+                        // TODO
+//                         def prsOut = sh(script: 'curl --get \
+//                                 --url "???" \
+//                                 --header "Authorization: $BITBUCKET_TOKEN" \
+//                                 --header "Accept: application/json"',
+//                             returnStdout: true).trim()
+//                         def prsDetails = readJSON text: prsOut
+//
+//                         if (!prsDetails.values.isEmpty()) {
+//                             env.INFRACOST_VCS_PULL_REQUEST_ID = prsDetails.values[0].id
+//                             env.INFRACOST_VCS_PULL_REQUEST_URL = prsDetails.values[0].links.self.href
+//                             env.INFRACOST_VCS_PULL_REQUEST_HTML_URL = prsDetails.values[0].links.html.href
+//                             env.INFRACOST_VCS_PULL_REQUEST_TITLE = prsDetails.values[0].title
+//                             env.INFRACOST_VCS_PULL_REQUEST_AUTHOR = prsDetails.values[0].author.nickname
+//                             env.INFRACOST_VCS_BASE_BRANCH = prsDetails.values[0].destination.branch.name
+//                         }
                     }
                 }
 
@@ -78,14 +99,27 @@ pipeline {
                     }
                     def failuresList = null
                     try {
-                        // find merge base for the PR
-                        def mergeBaseOut = sh(script: 'curl --get \
-                                --url "$BITBUCKET_API_URL/repositories/$REPO_NAME/merge-base/$INFRACOST_VCS_BASE_BRANCH..$INFRACOST_VCS_BRANCH" \
-                                --header "Authorization: $BITBUCKET_TOKEN" \
-                                --header "Accept: application/json"',
-                            returnStdout: true).trim()
-                        def mergeBaseDetails = readJSON text: mergeBaseOut
-                        def mergeBaseSha = mergeBaseDetails.hash
+                        def mergeBaseSha = null
+                        if (env.IS_BITBUCKET_CLOUD) {
+                            // find merge base for the PR from Bitbucket cloud REST API
+                            def mergeBaseOut = sh(script: 'curl -sS --get \
+                                    --url "$BITBUCKET_API_URL/repositories/$REPO_NAME/merge-base/$INFRACOST_VCS_BASE_BRANCH..$INFRACOST_VCS_BRANCH" \
+                                    --header "Authorization: $BITBUCKET_TOKEN" \
+                                    --header "Accept: application/json"',
+                                returnStdout: true).trim()
+                            def mergeBaseDetails = readJSON text: mergeBaseOut
+                            mergeBaseSha = mergeBaseDetails.hash
+                        } else {
+                            // find merge base for the PR from Bitbucket server REST API
+                            // TODO
+//                             def mergeBaseOut = sh(script: 'curl --get \
+//                                     --url "???" \
+//                                     --header "Authorization: $BITBUCKET_TOKEN" \
+//                                     --header "Accept: application/json"',
+//                                 returnStdout: true).trim()
+//                             def mergeBaseDetails = readJSON text: mergeBaseOut
+//                             mergeBaseSha = mergeBaseDetails.hash
+                        }
 
                         echo "Found merge base SHA: ${mergeBaseSha}"
 

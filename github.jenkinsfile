@@ -1,0 +1,198 @@
+// Requires Pipeline Utility Steps plugin (https://www.jenkins.io/doc/pipeline/steps/pipeline-utility-steps/)
+
+pipeline {
+    agent any
+
+    parameters {
+        string(name: 'REPO_NAME', description: 'GitHub repository name. E.g. "user/repo1"')
+        string(name: 'BRANCH_NAME', description: 'GitHub branch name. E.g. "my_branch"')
+        string(name: 'TF_VAR_FILE', defaultValue: '', description: 'Optional Terraform var file name, relative branch root. E.g. "path/to/my_var_file.tfvars"')
+    }
+
+    stages {
+        stage('infracost') {
+            agent {
+                docker {
+                    // Always use the latest 0.10.x version to pick up bug fixes and new resources.
+                    // See https://www.infracost.io/docs/integrations/cicd/#docker-images for other options
+                    image 'infracost/infracost:ci-0.10'
+                    args "--user=root --entrypoint='' --pull always"
+                }
+            }
+
+            steps {
+                script {
+                  // Set up required credentials for posting the comment, e.g. GitHub token, Infracost API key
+                  env.GITHUB_TOKEN = credentials('github-token')
+                  env.INFRACOST_API_KEY = credentials('infracost-api-key')
+
+                  env.LOG_LEVEL = 'warn'
+                  env.GITHUB_URL = 'https://github.com'
+                  env.GITHUB_API_URL = 'https://api.github.com'
+                  env.REPO_NAME = "${params.REPO_NAME}"
+                  env.BRANCH_NAME = "${params.BRANCH_NAME}"
+                  env.TF_VAR_FILE = "${params.TF_VAR_FILE ?: ''}"
+
+                  if (env.TF_VAR_FILE && !fileExists(env.TF_VAR_FILE)) {
+                     error("TF_VAR_FILE '${env.TF_VAR_FILE}' was specified but does not exist")
+                  }
+                }
+
+                script {
+                    // Get the default branch of the repository
+                    def repoApiUrl = "${env.GITHUB_API_URL}/repos/${env.REPO_NAME}"
+                    echo "Getting repo details from GitHub API: ${repoApiUrl}"
+                    def repoOutput = sh(script: 'curl -s -H \"Authorization: token $GITHUB_TOKEN\" \"' + repoApiUrl + '\"', returnStdout: true).trim()
+                    def repoDetails = readJSON text: repoOutput
+                    def defaultBranch = repoDetails.default_branch
+                    env.DEFAULT_BRANCH = defaultBranch
+
+                    // Call GitHub API to get branch details
+                    def branchApiUrl = "${env.GITHUB_API_URL}/repos/${env.REPO_NAME}/branches/${env.BRANCH_NAME}"
+                    echo "Getting branch details from GitHub API: ${branchApiUrl}"
+                    def output = sh(script: 'curl -s -H \"Authorization: token $GITHUB_TOKEN\" \"' + branchApiUrl + '\"', returnStdout: true).trim()
+                    def branchDetails = readJSON text: output
+
+                    // Set branch and repository environment variables
+                    env.INFRACOST_VCS_REPOSITORY_URL = "${GITHUB_URL}/${env.REPO_NAME}"
+                    env.INFRACOST_VCS_BRANCH = env.BRANCH_NAME
+                    env.INFRACOST_VCS_COMMIT_SHA = branchDetails.commit.sha
+                    env.INFRACOST_VCS_COMMIT_AUTHOR_NAME = branchDetails.commit.commit.author.name
+                    env.INFRACOST_VCS_COMMIT_AUTHOR_EMAIL = branchDetails.commit.commit.author.email
+                    env.INFRACOST_VCS_COMMIT_TIMESTAMP = branchDetails.commit.commit.author.date
+                    env.INFRACOST_VCS_COMMIT_MESSAGE = branchDetails.commit.commit.message
+
+                    echo 'Finished setting environment variables'
+                }
+
+                script {
+                  if (env.BRANCH_NAME == env.DEFAULT_BRANCH) {
+                      // don't create a diff, this is a default branch run
+                      return
+                  }
+                  echo "Generating Infracost baseline from default branch"
+                  def failuresList = null
+                  try {
+                    env.INFRACOST_VCS_BASE_BRANCH = env.DEFAULT_BRANCH
+
+                    // Get the merge base SHA using GitHub API
+                    def mergeBaseApiUrl = "${env.GITHUB_API_URL}/repos/${env.REPO_NAME}/compare/${env.DEFAULT_BRANCH}...${env.BRANCH_NAME}"
+                    echo "Getting merge base details from GitHub API: ${mergeBaseApiUrl}"
+                    def mergeBaseOutput = sh(script: 'curl -s -H \"Authorization: token $GITHUB_TOKEN\" \"' + mergeBaseApiUrl + '\"', returnStdout: true).trim()
+                    def mergeBaseDetails = readJSON text: mergeBaseOutput
+                    def mergeBaseSha = mergeBaseDetails.merge_base_commit.sha
+
+                    echo "Found merge base SHA: ${mergeBaseSha}"
+
+                    // Clone the repository to a temporary directory
+                    sh "git clone ${GITHUB_URL}/${env.REPO_NAME}.git /tmp/repo"
+
+                    // Checkout the merge base commit
+                    sh "cd /tmp/repo && git checkout -q ${mergeBaseSha}"
+
+                    sh 'infracost breakdown --path=/tmp/repo \
+                        --format=json \
+                        --out-file=/tmp/infracost-base.json \
+                        --log-level=$LOG_LEVEL \
+                        --terraform-var-file=$TF_VAR_FILE'
+
+                    echo "Generating Infracost diff"
+
+                    sh "cd /tmp/repo && git checkout ${env.INFRACOST_VCS_COMMIT_SHA}"
+
+                    // Generate an Infracost diff and save it to a JSON file.
+                    sh 'infracost diff --path=/tmp/repo \
+                                    --format=json \
+                                    --compare-to=/tmp/infracost-base.json \
+                                    --out-file=/tmp/infracost.json \
+                                    --log-level=$LOG_LEVEL \
+                                    --terraform-var-file=$TF_VAR_FILE'
+
+                    echo "Generating Infracost comment"
+
+                    // Post PR comment and upload the infracost.json file to Infracost Cloud
+                    def commentOutput = sh(
+                      script: 'infracost comment github --path=/tmp/infracost.json \
+                                                --repo=$REPO_NAME \
+                                                --commit=$INFRACOST_VCS_COMMIT_SHA \
+                                                --github-api-url=$GITHUB_API_URL \
+                                                --github-token=$GITHUB_TOKEN \
+                                                --behavior=update \
+                                                --format=json \
+                                                2> commentErrOut.txt \
+                                                || true',
+                      returnStdout: true,
+                    )
+                    def commentErrOut = readFile('commentErrOut.txt').trim()
+                    def commentUrl = commentErrOut.find(/[^\s]+#commitcomment[^\s]+/)
+                    def commentDetails = readJSON text: commentOutput
+
+                    def infracostReport = "########## See Infracost branch diff ##########\n${commentUrl}\n##########"
+                    echo infracostReport
+                    writeFile file: 'infracost.txt', text: infracostReport
+                    archiveArtifacts artifacts: 'infracost.txt'
+
+                    if (commentDetails.governanceFailures instanceof List && !commentDetails.governanceFailures.isEmpty()) {
+                      failuresList = commentDetails.governanceFailures.collect { it }
+                    }
+                  } catch (Exception e) {
+                    echo "Caught an error: ${e}"
+                  }
+                  if (failuresList != null) {
+                    error("Governance check failed:\n- ${failuresList.join(' ')}\n")
+                  }
+                }
+
+                script {
+                  if (env.BRANCH_NAME != env.DEFAULT_BRANCH) {
+                      // don't upload default branch breakdown, this is a feature branch run
+                      return
+                  }
+                  try {
+                    echo "Generating Infracost baseline for default branch"
+
+                    // Clone the repository to a temporary directory
+                    sh "git clone ${GITHUB_URL}/${env.REPO_NAME}.git /tmp/repo"
+
+                    // Checkout the default branch
+                    sh "cd /tmp/repo && git checkout ${env.DEFAULT_BRANCH}"
+
+                    // TODO add: Update PR status in Infracost Cloud based on git log, the following is from Azure DevOps' GitHub integration
+                    // PATTERN1="Merge pull request #([0-9]+) from"
+                    // PATTERN2=".* \(#([0-9]+)\)"
+                    // if [[ "$(Build.SourceVersionMessage)" =~ $PATTERN1 || "$(Build.SourceVersionMessage)" =~ $PATTERN2 ]]; then
+                    //   PR_ID=${BASH_REMATCH[1]}
+                    //   echo "Updating status of $PR_ID"
+                    //   curl \
+                    //     --request POST \
+                    //     --header "Content-Type: application/json" \
+                    //     --header "X-API-Key: $(infracostApiKey)" \
+                    //     --data "{ \"query\": \"mutation {updatePullRequestStatus( url: \\\"$(Build.Repository.Uri)/pulls/${PR_ID}\\\", status: MERGED )}\" }" \
+                    //     "https://dashboard.api.infracost.io/graphql";
+                    // else
+                    //   echo "Nothing to do as the commit message did not contain a merged PR ID."
+                    // fi
+
+                    // Run Infracost breakdown, don't use the TF_VAR_FILE so all projects in the repo are evaluated
+                    sh 'infracost breakdown --path=/tmp/repo \
+                                            --format=json \
+                                            --out-file=/tmp/infracost.json \
+                                            --log-level=$LOG_LEVEL'
+
+                    // Run Infracost upload
+                    def uploadOutput = sh( script: "infracost upload --path=/tmp/infracost.json --format=json || true", returnStdout: true )
+                    def uploadDetails = readJSON text: uploadOutput
+                    def repoUrl = uploadDetails.cloudUrl.find(/.*\/repos\/[^\/]+/)
+                    def infracostReport = "########## See Infracost repo report ##########\n${repoUrl}\n##########"
+
+                    echo infracostReport
+                    writeFile file: 'infracost.txt', text: infracostReport
+                    archiveArtifacts artifacts: 'infracost.txt'
+                  } catch (Exception e) {
+                    echo "Caught an error: ${e}"
+                  }
+                }
+            }
+        }
+    }
+}

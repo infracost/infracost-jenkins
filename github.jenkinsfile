@@ -20,15 +20,12 @@ pipeline {
                 }
             }
 
-            // Set up required credentials for posting the comment, e.g. GitHub token, Infracost API key
-            environment {
-                GITHUB_TOKEN = credentials('github-token')
-                INFRACOST_API_KEY = credentials('infracost-api-key')
-            }
-
             steps {
                 script {
                   // Set up required credentials for posting the comment, e.g. GitHub token, Infracost API key
+                  env.GITHUB_TOKEN = credentials('github-token')
+                  env.INFRACOST_API_KEY = credentials('infracost-api-key')
+
                   env.LOG_LEVEL = 'warn'
                   env.GITHUB_URL = 'https://github.com'
                   env.GITHUB_API_URL = 'https://api.github.com'
@@ -160,12 +157,27 @@ pipeline {
                     // Checkout the default branch
                     sh "cd /tmp/repo && git checkout ${env.DEFAULT_BRANCH}"
 
-                    // Run Infracost breakdown
+                    // TODO add: Update PR status in Infracost Cloud based on git log, the following is from Azure DevOps' GitHub integration
+                    // PATTERN1="Merge pull request #([0-9]+) from"
+                    // PATTERN2=".* \(#([0-9]+)\)"
+                    // if [[ "$(Build.SourceVersionMessage)" =~ $PATTERN1 || "$(Build.SourceVersionMessage)" =~ $PATTERN2 ]]; then
+                    //   PR_ID=${BASH_REMATCH[1]}
+                    //   echo "Updating status of $PR_ID"
+                    //   curl \
+                    //     --request POST \
+                    //     --header "Content-Type: application/json" \
+                    //     --header "X-API-Key: $(infracostApiKey)" \
+                    //     --data "{ \"query\": \"mutation {updatePullRequestStatus( url: \\\"$(Build.Repository.Uri)/pulls/${PR_ID}\\\", status: MERGED )}\" }" \
+                    //     "https://dashboard.api.infracost.io/graphql";
+                    // else
+                    //   echo "Nothing to do as the commit message did not contain a merged PR ID."
+                    // fi
+
+                    // Run Infracost breakdown, don't use the TF_VAR_FILE so all projects in the repo are evaluated
                     sh 'infracost breakdown --path=/tmp/repo \
                                             --format=json \
                                             --out-file=/tmp/infracost.json \
-                                            --log-level=$LOG_LEVEL \
-                                            --terraform-var-file=$TF_VAR_FILE'
+                                            --log-level=$LOG_LEVEL'
 
                     // Run Infracost upload
                     def uploadOutput = sh( script: "infracost upload --path=/tmp/infracost.json --format=json || true", returnStdout: true )

@@ -13,33 +13,33 @@ pipeline {
         stage('infracost') {
             agent {
                 docker {
-                    // Always use the latest 0.10.x version to pick up bug fixes and new resources.
-                    // See https://www.infracost.io/docs/integrations/cicd/#docker-images for other options
+                    // This uses the latest CLI patch version of 0.10 to pick up bug fixes and new resources.
                     image 'infracost/infracost:ci-0.10'
                     args "--user=root --entrypoint='' --pull always"
                 }
             }
 
-            // Set up required credentials for posting the comment, e.g. GitHub token, Infracost API key
-            environment {
-                BITBUCKET_APP_PASSWORD = credentials('bitbucket-app-password') // "<username>:<app password>" or "access token".  needs permissions for pullrequests write
-                // BITBUCKET_ACCESS_TOKEN = credentials('bitbucket-access-token') // "<username>:<app password>" or "access token".  needs permissions for pullrequests write
-                INFRACOST_API_KEY = credentials('infracost-api-key')
-            }
-
             steps {
                 script {
-                    // Set up required credentials for posting the comment, e.g. GitHub token, Infracost API key
+                    // Set up required Bitbucket credentials for posting pull request comments.
+                    // Read-only repository permission should be enough as the following doc mentions that "comment on a pull request" is allowed too:
+                    //   https://confluence.atlassian.com/bitbucketserver/using-repository-permissions-776639771.html 
+                    //
+                    // If you're using Bitbucket Cloud, this should be "<username>:<app password>"
+                    env.BITBUCKET_APP_PASSWORD = credentials('bitbucket-app-password')
+                    // If you're using Bitbucket Server, this should be an HTTP access token (https://confluence.atlassian.com/bitbucketserver/http-access-tokens-939515499.html)
+                    // env.BITBUCKET_ACCESS_TOKEN = credentials('bitbucket-access-token')
+
+                    env.BITBUCKET_URL = 'https://bitbucket.org' // Or https://your-bitbucket-server.com
+                    env.BITBUCKET_API_URL = 'https://api.bitbucket.org/2.0' // Or your bitbucket server API URL
+
+                    env.INFRACOST_API_KEY = credentials('infracost-api-key')
+
                     env.LOG_LEVEL = 'warn'
                     env.REPO_NAME = "${params.REPO_NAME}" // <workspace>/<repo>
                     env.BRANCH_NAME = "${params.BRANCH_NAME}"
-
-                    env.TF_VAR_FILE = "${params.TF_VAR_FILE ?: ''}"
-
-                    env.BITBUCKET_URL = 'https://bitbucket.org' // https://your-bitbucket-server.com
-                    env.BITBUCKET_API_URL = 'https://api.bitbucket.org/2.0'
                     env.BITBUCKET_GIT_ORIGIN = "${BITBUCKET_URL}/${env.REPO_NAME}" // or a SSH origin like "git@bitbucket.org:/<workspace>/<repo>.git"
-
+                    env.TF_VAR_FILE = "${params.TF_VAR_FILE ?: ''}"
 
                     if (env.TF_VAR_FILE && !fileExists(env.TF_VAR_FILE)) {
                        error("TF_VAR_FILE '${env.TF_VAR_FILE}' was specified but does not exist")
@@ -84,27 +84,32 @@ pipeline {
                         }
                     } else {
                         // look up PR details using the Bitbucket server REST API
-                        // TODO
-//                         def prsOut = sh(script: 'curl --get \
-//                                 --url "$BITBUCKET_API_URL/projects/{projectKey}/repos/{repositorySlug}/pull-requests" \
-//                                 --data-urlencode "at=refs/heads/$BRANCH_NAME" \
-//                                 --header "Authorization: $BEARER  $BITBUCKET_TOKEN" \
-//                                 --header "Accept: application/json"',
-//                             returnStdout: true).trim()
-//                         def prsDetails = readJSON text: prsOut
-//
-//                         if (!prsDetails.values.isEmpty()) {
-//                             env.INFRACOST_VCS_PULL_REQUEST_ID = prsDetails.values[0].id
-//                             env.INFRACOST_VCS_PULL_REQUEST_URL = "TODO"
-//                             env.INFRACOST_VCS_PULL_REQUEST_HTML_URL = "TODO"
-//                             env.INFRACOST_VCS_PULL_REQUEST_TITLE = prsDetails.values[0].title
-//                             env.INFRACOST_VCS_BASE_BRANCH = prsDetails.values[0].toRef.id
-//
-//                             def author = prsDetails.values[0].participants.find { it.role == "AUTHOR" }
-//                             if (author) {
-//                                  env.INFRACOST_VCS_PULL_REQUEST_AUTHOR = author.name
-//                             }
-//                         }
+                        //
+                        // NOTE: the following curl and code block needs to be tested with your Bitbucket server version,
+                        //       it might require tweaking. Once you're done testing, remove the -i from curl
+                        //       and the echo command to reduce noise in your logs.
+                        // 
+                        def prsOut = sh(script: 'curl -i --get \
+                                --url "$BITBUCKET_API_URL/projects/{projectKey}/repos/{repositorySlug}/pull-requests" \
+                                --data-urlencode "at=refs/heads/$BRANCH_NAME" \
+                                --header "Authorization: $BEARER  $BITBUCKET_TOKEN" \
+                                --header "Accept: application/json"',
+                            returnStdout: true).trim()
+                        def prsDetails = readJSON text: prsOut
+                        echo "Bitbucket API response for prsDetails: ${prsDetails}" // Delete this line after debugging
+
+                        if (!prsDetails.values.isEmpty()) {
+                            env.INFRACOST_VCS_PULL_REQUEST_ID = prsDetails.values[0].id
+                            env.INFRACOST_VCS_PULL_REQUEST_URL = "TODO"
+                            env.INFRACOST_VCS_PULL_REQUEST_HTML_URL = "TODO"
+                            env.INFRACOST_VCS_PULL_REQUEST_TITLE = prsDetails.values[0].title
+                            env.INFRACOST_VCS_BASE_BRANCH = prsDetails.values[0].toRef.id
+
+                            def author = prsDetails.values[0].participants.find { it.role == "AUTHOR" }
+                            if (author) {
+                                 env.INFRACOST_VCS_PULL_REQUEST_AUTHOR = author.name
+                            }
+                        }
                     }
                 }
 
@@ -127,14 +132,19 @@ pipeline {
                             mergeBaseSha = mergeBaseDetails.hash
                         } else {
                             // find merge base for the PR from Bitbucket server REST API
-                            // TODO
-//                             def mergeBaseOut = sh(script: 'curl --get \
-//                                     --url "$BITBUCKET_API_URL/projects/{projectKey}/repos/{repositorySlug}/pull-requests/{pullRequestId}/merge-base" \
-//                                     --header "Authorization: $BEARER $BITBUCKET_TOKEN" \
-//                                     --header "Accept: application/json"',
-//                                 returnStdout: true).trim()
-//                             def mergeBaseDetails = readJSON text: mergeBaseOut
-//                             mergeBaseSha = mergeBaseDetails.id
+                            //
+                            // NOTE: the following curl needs to be tested with your Bitbucket server version,
+                            //       it might require tweaking. Once you're done testing, remove the -i from curl
+                            //       and the echo command to reduce noise in your logs.
+                            // 
+                            def mergeBaseOut = sh(script: 'curl -i --get \
+                                    --url "$BITBUCKET_API_URL/projects/{projectKey}/repos/{repositorySlug}/pull-requests/{pullRequestId}/merge-base" \
+                                    --header "Authorization: $BEARER $BITBUCKET_TOKEN" \
+                                    --header "Accept: application/json"',
+                                returnStdout: true).trim()
+                            def mergeBaseDetails = readJSON text: mergeBaseOut
+                            echo "Bitbucket API response for mergeBaseDetails: ${mergeBaseDetails}" // Delete this line after debugging
+                            mergeBaseSha = mergeBaseDetails.id
                         }
 
                         echo "Found merge base SHA: ${mergeBaseSha}"
@@ -225,12 +235,27 @@ pipeline {
                         // Checkout the default branch
                         sh "cd /tmp/repo && git checkout ${env.BRANCH_NAME}"
 
-                        // Run Infracost breakdown
+                        // TODO add: Update PR status in Infracost Cloud based on git log
+                        // PATTERN="pull request #([0-9]+)"
+                        // if [[ "$(git show $BITBUCKET_COMMIT)" =~ $PATTERN ]]; then
+                        //   PR_ID=${BASH_REMATCH[1]}
+                        //   echo "Updating status of $PR_ID"
+
+                        //   curl \
+                        //     --request POST \
+                        //     --header "Content-Type: application/json" \
+                        //     --header "X-API-Key: ${INFRACOST_API_KEY}" \
+                        //     --data "{ \"query\": \"mutation { updatePullRequestStatus(url: \\\"${BITBUCKET_GIT_HTTP_ORIGIN}/pull-requests/${PR_ID}\\\", status: MERGED) }\" }" \
+                        //     "https://dashboard.api.infracost.io/graphql"
+                        // else
+                        //   echo "Nothing to do as the commit message did not contain a merged PR ID."
+                        // fi
+
+                        // Run Infracost breakdown, don't use the TF_VAR_FILE so all projects in the repo are evaluated
                         sh 'infracost breakdown --path=/tmp/repo \
                                 --format=json \
                                 --out-file=/tmp/infracost.json \
-                                --log-level=$LOG_LEVEL \
-                                --terraform-var-file=$TF_VAR_FILE'
+                                --log-level=$LOG_LEVEL'
 
                         // Run Infracost upload
                         def uploadOutput = sh( script: "infracost upload --path=/tmp/infracost.json --format=json || true", returnStdout: true )

@@ -22,9 +22,11 @@ This guide is for using Jenkins with GitHub and Bitbucket. GitHub users can also
         - To generate a Repository access token go to Repository Settings > Access tokens and generate a token that has read and write permissions for Repositories and Pull requests.
     - For Bitbucket Server, set this to your [HTTP access token](https://confluence.atlassian.com/bitbucketserver/http-access-tokens-939515499.html). Read-only repository permission should be enough as the [their docs](https://confluence.atlassian.com/bitbucketserver/using-repository-permissions-776639771.html) mentions that "comment on a pull request" is allowed too.
 
-5. Implement the [GitHub Jenkinsfile](github.jenkinsfile) or the [Bitbucket Jenkinsfile](bitbucket.jenkinsfile) in your Jenkins. Note how the Jenkinsfile has two key steps:
+5. Implement the [Bitbucket Jenkinsfile](bitbucket.jenkinsfile) in your Jenkins. Note how the Jenkinsfile has two key steps:
     - one step that runs on pull requests and posts the pull request comment
     - another step that runs when the main/master branch is updated to upload the results to Infracost Cloud
+
+    The [GitHub Jenkinsfile](github.jenkinsfile) example was developed for cases where there are no pull requests and instead a job is run on feature branches directly; if you use pull requests in your workflow, please email [hello@infracost.io](mailto:hello@infracost.io) so we can update it for you
 
 6. Follow [these simple steps](https://www.infracost.io/docs/infracost_cloud/get_started/#4-send-a-pull-request) to test the integration.
 

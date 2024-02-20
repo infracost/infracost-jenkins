@@ -23,7 +23,7 @@ pipeline {
                 script {
                     // Set up required Bitbucket credentials for posting pull request comments.
                     // Read-only repository permission should be enough as the following doc mentions that "comment on a pull request" is allowed too:
-                    //   https://confluence.atlassian.com/bitbucketserver/using-repository-permissions-776639771.html 
+                    //   https://confluence.atlassian.com/bitbucketserver/using-repository-permissions-776639771.html
                     //
                     // If you're using Bitbucket Cloud, this should be "<username>:<app password>"
                     env.BITBUCKET_APP_PASSWORD = credentials('bitbucket-app-password')
@@ -76,8 +76,7 @@ pipeline {
 
                         if (!prsDetails.values.isEmpty()) {
                             env.INFRACOST_VCS_PULL_REQUEST_ID = prsDetails.values[0].id
-                            env.INFRACOST_VCS_PULL_REQUEST_URL = prsDetails.values[0].links.self.href
-                            env.INFRACOST_VCS_PULL_REQUEST_HTML_URL = prsDetails.values[0].links.html.href
+                            env.INFRACOST_VCS_PULL_REQUEST_URL = prsDetails.values[0].links.html.href
                             env.INFRACOST_VCS_PULL_REQUEST_TITLE = prsDetails.values[0].title
                             env.INFRACOST_VCS_PULL_REQUEST_AUTHOR = prsDetails.values[0].author.nickname
                             env.INFRACOST_VCS_BASE_BRANCH = prsDetails.values[0].destination.branch.name
@@ -88,7 +87,7 @@ pipeline {
                         // NOTE: the following curl and code block needs to be tested with your Bitbucket server version,
                         //       it might require tweaking. Once you're done testing, remove the -i from curl
                         //       and the echo command to reduce noise in your logs.
-                        // 
+                        //
                         def prsOut = sh(script: 'curl -i --get \
                                 --url "$BITBUCKET_API_URL/projects/{projectKey}/repos/{repositorySlug}/pull-requests" \
                                 --data-urlencode "at=refs/heads/$BRANCH_NAME" \
@@ -101,7 +100,6 @@ pipeline {
                         if (!prsDetails.values.isEmpty()) {
                             env.INFRACOST_VCS_PULL_REQUEST_ID = prsDetails.values[0].id
                             env.INFRACOST_VCS_PULL_REQUEST_URL = "TODO"
-                            env.INFRACOST_VCS_PULL_REQUEST_HTML_URL = "TODO"
                             env.INFRACOST_VCS_PULL_REQUEST_TITLE = prsDetails.values[0].title
                             env.INFRACOST_VCS_BASE_BRANCH = prsDetails.values[0].toRef.id
 
@@ -136,7 +134,7 @@ pipeline {
                             // NOTE: the following curl needs to be tested with your Bitbucket server version,
                             //       it might require tweaking. Once you're done testing, remove the -i from curl
                             //       and the echo command to reduce noise in your logs.
-                            // 
+                            //
                             def mergeBaseOut = sh(script: 'curl -i --get \
                                     --url "$BITBUCKET_API_URL/projects/{projectKey}/repos/{repositorySlug}/pull-requests/{pullRequestId}/merge-base" \
                                     --header "Authorization: $BEARER $BITBUCKET_TOKEN" \
@@ -201,7 +199,7 @@ pipeline {
                         }
                         commentMatch = null // This is needed because Jenkins can't serialize the matcher object
 
-                        def commentUrl = "${env.INFRACOST_VCS_PULL_REQUEST_HTML_URL}${commentAnchor}"
+                        def commentUrl = "${env.INFRACOST_VCS_PULL_REQUEST_URL}${commentAnchor}"
                         def commentDetails = readJSON text: commentOutput
 
                         def infracostReport = "########## See Infracost branch diff ##########\n${commentUrl}\n##########"
@@ -235,22 +233,6 @@ pipeline {
                         // Checkout the default branch
                         sh "cd /tmp/repo && git checkout ${env.BRANCH_NAME}"
 
-                        // TODO add: Update PR status in Infracost Cloud based on git log
-                        // PATTERN="pull request #([0-9]+)"
-                        // if [[ "$(git show $BITBUCKET_COMMIT)" =~ $PATTERN ]]; then
-                        //   PR_ID=${BASH_REMATCH[1]}
-                        //   echo "Updating status of $PR_ID"
-
-                        //   curl \
-                        //     --request POST \
-                        //     --header "Content-Type: application/json" \
-                        //     --header "X-API-Key: ${INFRACOST_API_KEY}" \
-                        //     --data "{ \"query\": \"mutation { updatePullRequestStatus(url: \\\"${BITBUCKET_GIT_HTTP_ORIGIN}/pull-requests/${PR_ID}\\\", status: MERGED) }\" }" \
-                        //     "https://dashboard.api.infracost.io/graphql"
-                        // else
-                        //   echo "Nothing to do as the commit message did not contain a merged PR ID."
-                        // fi
-
                         // Run Infracost breakdown, don't use the TF_VAR_FILE so all projects in the repo are evaluated
                         sh 'infracost breakdown --path=/tmp/repo \
                                 --format=json \
@@ -266,6 +248,33 @@ pipeline {
                         echo infracostReport
                         writeFile file: 'infracost.txt', text: infracostReport
                         archiveArtifacts artifacts: 'infracost.txt'
+
+                        // Check for a PR merge in the git log and update PR status in Infracost Cloud
+                        gitLogOut = sh (script: 'cd /tmp/repo && git log -1', returnStdout: true)
+                        def prMergeMatch = gitLogOut =~ /\(pull request #(\d+)\)/
+                        def prNumber
+                        if (prMergeMatch) {
+                            prNumber = prMergeMatch[0][1]
+                        }
+                        prMergeMatch = null // This is needed because Jenkins can't serialize the matcher object
+                        if (prNumber) {
+                            echo "Found merge comment for PR ${prNumber}"
+                            if (env.IS_BITBUCKET_CLOUD) {
+                                env.INFRACOST_VCS_PULL_REQUEST_URL = "$BITBUCKET_URL/$REPO_NAME/pull-requests/$prNumber"
+                            } else {
+                                // TODO, how do we calculate the pr url for a pr number?
+                                //env.INFRACOST_VCS_PULL_REQUEST_URL = "$BITBUCKET_URL/$REPO_NAME/pull-requests/$prNumber"
+                            }
+
+                            if (env.INFRACOST_VCS_PULL_REQUEST_URL) {
+                                sh 'curl -sS --request POST \
+                                        --header "Content-Type: application/json" \
+                                        --header "X-API-Key: ${INFRACOST_API_KEY}" \
+                                        --data \'{ "query": "mutation { updatePullRequestStatus(url: \\"\'$INFRACOST_VCS_PULL_REQUEST_URL\'\\", status: MERGED) }" }\' \
+                                        "https://dashboard.api.infracost.io/graphql"'
+                                echo "Updated $INFRACOST_VCS_PULL_REQUEST_URL to merged."
+                            }
+                        }
                     } catch (Exception e) {
                        echo "Caught an error: ${e}"
                     }

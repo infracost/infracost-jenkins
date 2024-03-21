@@ -85,10 +85,10 @@ pipeline {
                     echo "Found merge base SHA: ${mergeBaseSha}"
 
                     // Clone the repository to a temporary directory
-                    sh "git clone ${GITHUB_URL}/${env.REPO_NAME}.git /tmp/repo"
+                    sh "git clone --depth 1 -b ${env.INFRACOST_VCS_COMMIT_SHA} ${GITHUB_URL}/${env.REPO_NAME}.git /tmp/repo"
 
                     // Checkout the merge base commit
-                    sh "cd /tmp/repo && git checkout -q ${mergeBaseSha}"
+                    sh "cd /tmp/repo && git fetch --depth 1 origin ${mergeBaseSha} && git checkout -q ${mergeBaseSha}"
 
                     sh 'infracost breakdown --path=/tmp/repo \
                         --format=json \
@@ -152,10 +152,7 @@ pipeline {
                     echo "Generating Infracost baseline for default branch"
 
                     // Clone the repository to a temporary directory
-                    sh "git clone ${GITHUB_URL}/${env.REPO_NAME}.git /tmp/repo"
-
-                    // Checkout the default branch
-                    sh "cd /tmp/repo && git checkout ${env.DEFAULT_BRANCH}"
+                    sh "git clone --depth 1 -b ${env.DEFAULT_BRANCH} ${GITHUB_URL}/${env.REPO_NAME}.git /tmp/repo && cd /tmp/repo"
 
                     // For cases where you use pull requests in your workflow, we need to add a step here
                     // that updates the PR status in Infracost Cloud based on the PR number from the git log.

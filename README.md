@@ -22,7 +22,7 @@ This guide is for using Jenkins with GitHub and Bitbucket. GitHub users can also
         - To generate a Repository access token go to Repository Settings > Access tokens and generate a token that has read and write permissions for Repositories and Pull requests.
     - For Bitbucket Server, set this to your [HTTP access token](https://confluence.atlassian.com/bitbucketserver/http-access-tokens-939515499.html). Read-only repository permission should be enough as the [their docs](https://confluence.atlassian.com/bitbucketserver/using-repository-permissions-776639771.html) mentions that "comment on a pull request" is allowed too.
 
-5. Implement the [Bitbucket Jenkinsfile](bitbucket.jenkinsfile) in your Jenkins. Note how the Jenkinsfile has two key steps:
+5. Implement either [Bitbucket Cloud Jenkinsfile](bitbucket-cloud.jenkinsfile) or [Bitbucket Server Jenkinsfile](bitbucket-server.jenkinsfile) in your Jenkins. Note how the Jenkinsfile has two key steps:
     - one step that runs on pull requests and posts the pull request comment
     - another step that runs when the main/master branch is updated to upload the results to Infracost Cloud
 

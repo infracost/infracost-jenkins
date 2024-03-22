@@ -98,11 +98,8 @@ pipeline {
                 script {
                     echo "Running Infracost on base branch"
 
-                    // Clone the repository to a temporary directory
-                    sh "git clone https://github.com/${env.REPO_NAME}.git /tmp/repo"
-
-                    // Checkout the merge base commit
-                    sh "cd /tmp/repo && git checkout -q ${env.MERGE_BASE_SHA}"
+                    // Clone the repository to a temporary directory at the merge base commit
+                    sh "git clone --depth 1 -b ${env.MERGE_BASE_SHA} https://github.com/${env.REPO_NAME}.git /tmp/repo && cd /tmp/repo"
 
                     sh 'infracost breakdown --path=/tmp/repo \
                         --format=json \
@@ -112,7 +109,7 @@ pipeline {
                 script {
                     echo "Running Infracost on PR branch"
 
-                    sh "cd /tmp/repo && git checkout ${env.INFRACOST_VCS_COMMIT_SHA}"
+                    sh "cd /tmp/repo && git fetch --depth 1 origin ${env.INFRACOST_VCS_COMMIT_SHA} && git checkout ${env.INFRACOST_VCS_COMMIT_SHA}"
 
                     // Generate an Infracost diff and save it to a JSON file.
                     sh 'infracost diff --path=/tmp/repo \
@@ -249,10 +246,7 @@ pipeline {
                             def repoSlug = repoName.trim().replace('/', '_')
 
                             // Clone the repository to a temporary directory
-                            sh "git clone https://github.com/${repoName}.git /tmp/${repoSlug}"
-
-                            // Checkout the default branch
-                            sh "cd /tmp/${repoSlug} && git checkout ${defaultBranch}"
+                            sh "git clone --depth 1 -b ${defaultBranch} https://github.com/${repoName}.git /tmp/${repoSlug} && cd /tmp/${repoSlug}"
 
                             // Run Infracost breakdown
                             sh """
@@ -263,7 +257,7 @@ pipeline {
                             """
 
                             // Run Infracost upload
-                            sh "infracost upload --path=/tmp/infracost-${repoSlug}.json  || echo 'Always pass main branch runs even if there are policy failures'"
+                            sh "infracost upload --path=/tmp/infracost-${repoSlug}.json
 
                             // Cleanup
                             sh "rm -rf /tmp/${repoSlug}"

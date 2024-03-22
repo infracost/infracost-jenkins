@@ -41,6 +41,12 @@ pipeline {
                     if (env.TF_VAR_FILE && !fileExists(env.TF_VAR_FILE)) {
                        error("TF_VAR_FILE '${env.TF_VAR_FILE}' was specified but does not exist")
                     }
+
+                    // If you store Terraform variables or modules in a 3rd party such as Terraform Cloud or Spacelift,
+                    // specify the following so Infracost can automatically retrieve them.
+                    // See https://www.infracost.io/docs/features/terraform_modules/#registry-modules for details.
+                    // env.INFRACOST_TERRAFORM_CLOUD_TOKEN = credentials('terraform-cloud-token')
+                    // env.INFRACOST_TERRAFORM_CLOUD_HOST = 'app.terraform.io'
                 }
 
                 script {

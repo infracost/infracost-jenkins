@@ -1,0 +1,242 @@
+// Requires Pipeline Utility Steps plugin (https://www.jenkins.io/doc/pipeline/steps/pipeline-utility-steps/)
+
+pipeline {
+    agent any
+
+    parameters {
+        string(name: 'REPO_NAME', description: 'Bitbucket repository name. E.g. ""')
+        string(name: 'BRANCH_NAME', description: 'Bitbucket branch name. E.g. "my_branch"')
+        string(name: 'TF_VAR_FILE', defaultValue: '', description: 'Optional Terraform var file name, relative branch root. E.g. "path/to/my_var_file.tfvars"')
+    }
+
+    stages {
+        stage('infracost') {
+            agent {
+                docker {
+                    // This uses the latest CLI patch version of 0.10 to pick up bug fixes and new resources.
+                    image 'infracost/infracost:ci-0.10'
+                    args "--user=root --entrypoint='' --pull always"
+                }
+            }
+
+            steps {
+                script {
+                    // Set up required Bitbucket credentials for posting pull request comments.
+                    // Read-only repository permission should be enough as the following doc mentions that "comment on a pull request" is allowed too:
+                    //   https://confluence.atlassian.com/bitbucketserver/using-repository-permissions-776639771.html
+                    env.BITBUCKET_ACCESS_TOKEN = credentials('bitbucket-access-token')
+
+                    env.BITBUCKET_URL = 'https://bitbucket.org' // Or https://your-bitbucket-server.com
+                    env.BITBUCKET_API_URL = 'https://api.bitbucket.org/2.0' // Or your bitbucket server API URL
+
+                    env.INFRACOST_API_KEY = credentials('infracost-api-key')
+
+                    env.LOG_LEVEL = 'warn'
+                    env.REPO_NAME = "${params.REPO_NAME}" // <workspace>/<repo>
+                    env.BRANCH_NAME = "${params.BRANCH_NAME}"
+                    env.BITBUCKET_GIT_ORIGIN = "${BITBUCKET_URL}/${env.REPO_NAME}" // or a SSH origin like "git@bitbucket.org:/<workspace>/<repo>.git"
+                    env.TF_VAR_FILE = "${params.TF_VAR_FILE ?: ''}"
+
+                    if (env.TF_VAR_FILE && !fileExists(env.TF_VAR_FILE)) {
+                       error("TF_VAR_FILE '${env.TF_VAR_FILE}' was specified but does not exist")
+                    }
+                }
+
+                script {
+                    if (env.BITBUCKET_APP_PASSWORD) {
+                        env.BITBUCKET_TOKEN = env.BITBUCKET_APP_PASSWORD
+                    } else if (env.BITBUCKET_ACCESS_TOKEN) {
+                        env.BITBUCKET_TOKEN = env.BITBUCKET_ACCESS_TOKEN
+                        env.BEARER = "Bearer"
+                    } else {
+                        error("Either BITBUCKET_APP_PASSWORD or BITBUCKET_ACCESS_TOKEN environment variable is required")
+                    }
+
+                    // setup env necessary for infracost breakdown
+
+                    env.INFRACOST_VCS_PROVIDER = 'bitbucket'
+                    env.INFRACOST_VCS_REPOSITORY_URL = "${env.BITBUCKET_URL}/${env.REPO_NAME}"
+                    env.INFRACOST_VCS_BRANCH = env.BRANCH_NAME
+
+                    // look up PR details using the Bitbucket server REST API
+                    //
+                    // NOTE: the following curl and code block needs to be tested with your Bitbucket server version,
+                    //       it might require tweaking. Once you're done testing, remove the -i from curl
+                    //       and the echo command to reduce noise in your logs.
+                    //
+                    def prsOut = sh(script: 'curl -i --get \
+                            --url "$BITBUCKET_API_URL/projects/{projectKey}/repos/{repositorySlug}/pull-requests" \
+                            --data-urlencode "at=refs/heads/$BRANCH_NAME" \
+                            --header "Authorization: $BEARER  $BITBUCKET_TOKEN" \
+                            --header "Accept: application/json"',
+                        returnStdout: true).trim()
+                    def prsDetails = readJSON text: prsOut
+                    echo "Bitbucket API response for prsDetails: ${prsDetails}" // Delete this line after debugging
+
+                    if (!prsDetails.values.isEmpty()) {
+                        env.INFRACOST_VCS_PULL_REQUEST_ID = prsDetails.values[0].id
+                        env.INFRACOST_VCS_PULL_REQUEST_URL = "TODO"
+                        env.INFRACOST_VCS_PULL_REQUEST_TITLE = prsDetails.values[0].title
+                        env.INFRACOST_VCS_BASE_BRANCH = prsDetails.values[0].toRef.id
+
+                        def author = prsDetails.values[0].participants.find { it.role == "AUTHOR" }
+                        if (author) {
+                             env.INFRACOST_VCS_PULL_REQUEST_AUTHOR = author.name
+                        }
+                    }
+                }
+
+                script {
+                    if (!env.INFRACOST_VCS_PULL_REQUEST_URL) {
+                        // this is a branch run and will be handled by the next script block
+                      return
+                    }
+                    def failuresList = null
+                    try {
+                        def mergeBaseSha = null
+                        // find merge base for the PR from Bitbucket server REST API
+                        //
+                        // NOTE: the following curl needs to be tested with your Bitbucket server version,
+                        //       it might require tweaking. Once you're done testing, remove the -i from curl
+                        //       and the echo command to reduce noise in your logs.
+                        //
+                        def mergeBaseOut = sh(script: 'curl -i --get \
+                                --url "$BITBUCKET_API_URL/projects/{projectKey}/repos/{repositorySlug}/pull-requests/{pullRequestId}/merge-base" \
+                                --header "Authorization: $BEARER $BITBUCKET_TOKEN" \
+                                --header "Accept: application/json"',
+                            returnStdout: true).trim()
+                        def mergeBaseDetails = readJSON text: mergeBaseOut
+                        echo "Bitbucket API response for mergeBaseDetails: ${mergeBaseDetails}" // Delete this line after debugging
+                        mergeBaseSha = mergeBaseDetails.id
+
+                        echo "Found merge base SHA: ${mergeBaseSha}"
+
+                        // Clone the repository to a temporary directory
+                        sh "git clone --depth 1 -b ${env.INFRACOST_VCS_BRANCH} $BITBUCKET_GIT_ORIGIN /tmp/repo"
+
+                        echo "Generating Infracost baseline from merge base"
+
+                        // Checkout the merge base commit
+                        sh "cd /tmp/repo && git fetch --depth 1 origin ${mergeBaseSha} && git checkout -q ${mergeBaseSha}"
+
+                        sh 'infracost breakdown --path=/tmp/repo \
+                            --format=json \
+                            --out-file=/tmp/infracost-base.json \
+                            --log-level=$LOG_LEVEL \
+                            --terraform-var-file=$TF_VAR_FILE'
+
+                        echo "Generating Infracost diff"
+
+                        sh "cd /tmp/repo && git checkout ${env.INFRACOST_VCS_BRANCH}"
+
+                        // Generate an Infracost diff and save it to a JSON file.
+                        sh 'infracost diff --path=/tmp/repo \
+                                --format=json \
+                                --compare-to=/tmp/infracost-base.json \
+                                --out-file=/tmp/infracost.json \
+                                --log-level=$LOG_LEVEL \
+                                --terraform-var-file=$TF_VAR_FILE'
+
+                        echo "Generating Infracost comment"
+
+                        // Post PR comment and upload the infracost.json file to Infracost Cloud
+                        def commentOutput = sh(
+                            script: 'infracost comment bitbucket --path=/tmp/infracost.json \
+                                    --repo=$REPO_NAME \
+                                    --pull-request=$INFRACOST_VCS_PULL_REQUEST_ID \
+                                    --bitbucket-server-url=$BITBUCKET_URL \
+                                    --bitbucket-token=$BITBUCKET_TOKEN \
+                                    --behavior=update \
+                                    --format=json \
+                                    --exclude-cli-output \
+                                    2> commentErrOut.txt \
+                                    || true',
+                            returnStdout: true,
+                        )
+                        def commentErrOut = readFile('commentErrOut.txt').trim()
+                        echo commentErrOut
+
+                        def commentAnchor = ""
+                        def commentMatch = commentErrOut =~ /\/comments\/([^\s]+)/
+                        if (commentMatch) {
+                            commentAnchor = "#comment-${commentMatch[0][1]}"
+                        }
+                        commentMatch = null // This is needed because Jenkins can't serialize the matcher object
+
+                        def commentUrl = "${env.INFRACOST_VCS_PULL_REQUEST_URL}${commentAnchor}"
+                        def commentDetails = readJSON text: commentOutput
+
+                        def infracostReport = "########## See Infracost branch diff ##########\n${commentUrl}\n##########"
+                        echo infracostReport
+                        writeFile file: 'infracost.txt', text: infracostReport
+                        archiveArtifacts artifacts: 'infracost.txt'
+
+                        if (commentDetails.governanceFailures instanceof List && !commentDetails.governanceFailures.isEmpty()) {
+                           failuresList = commentDetails.governanceFailures.collect { it }
+                        }
+                    } catch (Exception e) {
+                        echo "Caught an error: ${e}"
+                    }
+                    if (failuresList != null) {
+                        error("Governance check failed:\n- ${failuresList.join(' ')}\n")
+                    }
+                }
+
+                script {
+                    if (env.INFRACOST_VCS_PULL_REQUEST_URL) {
+                        // this is a PR run and has been handled by the previous script block
+                        return
+                    }
+
+                    try {
+                        echo "Generating Infracost baseline for default branch"
+
+                        // Clone the repository to a temporary directory
+                        sh "git clone --depth 1 -b ${env.BRANCH_NAME} $BITBUCKET_GIT_ORIGIN /tmp/repo && cd /tmp/repo"
+
+                        // Run Infracost breakdown, don't use the TF_VAR_FILE so all projects in the repo are evaluated
+                        sh 'infracost breakdown --path=/tmp/repo \
+                                --format=json \
+                                --out-file=/tmp/infracost.json \
+                                --log-level=$LOG_LEVEL'
+
+                        // Run Infracost upload
+                        def uploadOutput = sh( script: "infracost upload --path=/tmp/infracost.json --format=json || true", returnStdout: true )
+                        def uploadDetails = readJSON text: uploadOutput
+                        def repoUrl = uploadDetails.cloudUrl.find(/.*\/repos\/[^\/]+/)
+                        def infracostReport = "########## See Infracost repo report ##########\n${repoUrl}\n##########"
+
+                        echo infracostReport
+                        writeFile file: 'infracost.txt', text: infracostReport
+                        archiveArtifacts artifacts: 'infracost.txt'
+
+                        // Check for a PR merge in the git log and update PR status in Infracost Cloud
+                        gitLogOut = sh (script: 'cd /tmp/repo && git log -1', returnStdout: true)
+                        def prMergeMatch = gitLogOut =~ /\(pull request #(\d+)\)/
+                        def prNumber
+                        if (prMergeMatch) {
+                            prNumber = prMergeMatch[0][1]
+                        }
+                        prMergeMatch = null // This is needed because Jenkins can't serialize the matcher object
+                        if (prNumber) {
+                            echo "Found merge comment for PR ${prNumber}"
+                            // TODO, how do we calculate the pr url for a pr number?
+                            //env.INFRACOST_VCS_PULL_REQUEST_URL = "$BITBUCKET_URL/$REPO_NAME/pull-requests/$prNumber"
+
+                            if (env.INFRACOST_VCS_PULL_REQUEST_URL) {
+                                sh 'curl -sS --request POST \
+                                        --header "Content-Type: application/json" \
+                                        --header "X-API-Key: ${INFRACOST_API_KEY}" \
+                                        --data \'{ "query": "mutation { updatePullRequestStatus(url: \\"\'$INFRACOST_VCS_PULL_REQUEST_URL\'\\", status: MERGED) }" }\' \
+                                        "https://dashboard.api.infracost.io/graphql"'
+                                echo "Updated $INFRACOST_VCS_PULL_REQUEST_URL to merged."
+                            }
+                        }
+                    } catch (Exception e) {
+                       echo "Caught an error: ${e}"
+                    }
+                }
+            }
+        }
+    }
+}

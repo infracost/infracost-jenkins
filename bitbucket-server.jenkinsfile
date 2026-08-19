@@ -99,7 +99,6 @@ pipeline {
                     }
                     def failuresList = null
                     try {
-                        def mergeBaseSha = null
                         // find merge base for the PR from Bitbucket server REST API
                         //
                         // NOTE: the following curl needs to be tested with your Bitbucket server version,
@@ -113,17 +112,17 @@ pipeline {
                             returnStdout: true).trim()
                         def mergeBaseDetails = readJSON text: mergeBaseOut
                         echo "Bitbucket API response for mergeBaseDetails: ${mergeBaseDetails}" // Delete this line after debugging
-                        mergeBaseSha = mergeBaseDetails.id
+                        env.MERGE_BASE_SHA = mergeBaseDetails.id
 
-                        echo "Found merge base SHA: ${mergeBaseSha}"
+                        echo "Found merge base SHA: ${env.MERGE_BASE_SHA}"
 
                         // Clone the repository to a temporary directory
-                        sh "git clone --depth 1 -b ${env.INFRACOST_VCS_BRANCH} $BITBUCKET_GIT_ORIGIN /tmp/repo"
+                        sh 'git clone --depth 1 --branch "$INFRACOST_VCS_BRANCH" "$BITBUCKET_GIT_ORIGIN" /tmp/repo'
 
                         echo "Generating Infracost baseline from merge base"
 
                         // Checkout the merge base commit
-                        sh "cd /tmp/repo && git fetch --depth 1 origin ${mergeBaseSha} && git checkout -q ${mergeBaseSha}"
+                        sh 'cd /tmp/repo && git fetch --depth 1 origin "$MERGE_BASE_SHA" && git checkout --quiet --detach "$MERGE_BASE_SHA"'
 
                         sh 'infracost breakdown --path=/tmp/repo \
                             --format=json \
@@ -133,7 +132,7 @@ pipeline {
 
                         echo "Generating Infracost diff"
 
-                        sh "cd /tmp/repo && git checkout ${env.INFRACOST_VCS_BRANCH}"
+                        sh 'cd /tmp/repo && git checkout --detach "$INFRACOST_VCS_BRANCH"'
 
                         // Generate an Infracost diff and save it to a JSON file.
                         sh 'infracost diff --path=/tmp/repo \
@@ -198,7 +197,7 @@ pipeline {
                         echo "Generating Infracost baseline for default branch"
 
                         // Clone the repository to a temporary directory
-                        sh "git clone --depth 1 -b ${env.BRANCH_NAME} $BITBUCKET_GIT_ORIGIN /tmp/repo && cd /tmp/repo"
+                        sh 'git clone --depth 1 --branch "$BRANCH_NAME" "$BITBUCKET_GIT_ORIGIN" /tmp/repo'
 
                         // Run Infracost breakdown, don't use the TF_VAR_FILE so all projects in the repo are evaluated
                         sh 'infracost breakdown --path=/tmp/repo \
